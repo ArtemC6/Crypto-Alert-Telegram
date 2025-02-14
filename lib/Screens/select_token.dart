@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class SelectCoinsScreen extends StatefulWidget {
@@ -7,6 +6,7 @@ class SelectCoinsScreen extends StatefulWidget {
   final Function(List<String>) onCoinsSelected;
 
   const SelectCoinsScreen({
+    super.key,
     required this.availableCoins,
     required this.selectedCoins,
     required this.onCoinsSelected,
@@ -41,22 +41,20 @@ class _SelectCoinsScreenState extends State<SelectCoinsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Select Coins'),
+        title: Text('Select Coins ${filteredCoins.length}'),
       ),
       body: Column(
         children: [
-          // Поле поиска
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
               decoration: InputDecoration(
-                labelText: 'Search',
+                labelText: 'Search ${selectedCoins.length}',
                 border: OutlineInputBorder(),
               ),
               onChanged: _onSearchQueryChanged,
             ),
           ),
-
           Expanded(
             child: ListView.builder(
               itemCount: filteredCoins.length,

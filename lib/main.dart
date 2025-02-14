@@ -33,16 +33,16 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  late WebSocketChannel _channel, _byBitChannel;
+  WebSocketChannel? _channel, _byBitChannel;
   late Map<String, double> previousPrices;
   late Map<String, DateTime> lastUpdateTimes;
   late List<Map<String, dynamic>> coinsList;
+  late List<Map<String, dynamic>> coinsListForSelect;
   final String telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
   final String chatId = '1288898832';
 
   int selectedTime = 30; // Выбранное время для проверки изменений (в минутах)
   List<String> selectedCoins = [];
-  String selectedPair = 'USDT';
   double priceChangeThreshold = 1.0;
   bool isHide = true;
 
@@ -56,105 +56,63 @@ class _MyHomePageState extends State<MyHomePage> {
     previousPrices = {};
     lastUpdateTimes = {};
     coinsList = [];
+    coinsListForSelect = [];
     _loadSelectedCoins();
-    _connectWebSocketBinance();
+    fetchAllCoins();
     // _connectWebSocketByBit();
+  }
+
+  Future<void> fetchAllCoins() async {
+    final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final symbols = data['symbols'] as List;
+      // Добавляем в coinsListForSelect
+      setState(() => coinsListForSelect = symbols
+          .where((symbol) => symbol['status'] == 'TRADING')
+          .map((symbol) => {
+                'symbol': symbol['symbol'],
+                'status': symbol['status'],
+              })
+          .toList());
+    } else {
+      throw Exception('Failed to load coins');
+    }
   }
 
   void _loadSelectedCoins() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    setState(() {
-      selectedCoins = prefs.getStringList('selectedCoins') ?? [];
+    setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
+    _connectWebSocketBinance();
+  }
+
+  void _connectWebSocketBinance() {
+    if (selectedCoins.isEmpty) return;
+    if (_channel != null) {
+      _channel!.sink.close();
+    }
+
+    String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
+    _channel = WebSocketChannel.connect(
+      Uri.parse('wss://stream.binance.com:9443/ws/$streams'),
+    );
+
+    _channel!.stream.listen((message) {
+      _processMessageBinance(message);
     });
   }
 
   void _saveSelectedCoins() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     prefs.setStringList('selectedCoins', selectedCoins);
+    _connectWebSocketBinance();
   }
 
-  void _connectWebSocketBinance() {
-    _channel = WebSocketChannel.connect(
-      Uri.parse('wss://stream.binance.com:9443/ws/!ticker@arr'),
-    );
-
-    _channel.stream.listen((message) {
-      _processMessageBinance(message);
-    });
-  }
-
-  void _connectWebSocketByBit() {
-    _byBitChannel = WebSocketChannel.connect(
-      Uri.parse('wss://stream.bybit.com/v5/public/spot'),
-    );
-
-    _byBitChannel.sink.add(jsonEncode({
-      "op": "subscribe",
-      "args": ["klineV2.1.BTCUSDT"]
-    }));
-
-    _byBitChannel.stream.listen(
-      (message) {
-        print('_______-');
-        print(message);
-        _processMessageByBit(message);
-      },
-    );
-  }
-
-  void _processMessageByBit(dynamic message) {
-    final data = json.decode(message);
-
-    if (data['topic'] == null) return; // Ignore non-topic messages
-
-    String topic = data['topic'];
-    if (topic.startsWith('klineV2.')) {
-      var klineData = data['data'];
-      if (klineData != null && klineData['kline'] != null) {
-        var kline = klineData['kline'];
-        String symbol = topic.split('.')[2]; // Extract symbol from topic
-        double price = double.parse(kline['close']);
-        double changePercentage = 0;
-        String changeDirection = '';
-
-        if (previousPrices.containsKey(symbol)) {
-          double prevPrice = previousPrices[symbol]!;
-          changePercentage = ((price - prevPrice) / prevPrice) * 100;
-          changeDirection = price > prevPrice ? '📈' : '📉';
-          DateTime currentTime = DateTime.now();
-          DateTime lastUpdateTime = lastUpdateTimes[symbol]!;
-
-          if (currentTime.difference(lastUpdateTime).inSeconds <= quickCheckTime) {
-            if (changePercentage.abs() >= quickChangeThreshold && selectedCoins.contains(symbol)) {
-              _sendTelegramNotification(symbol, changePercentage, changeDirection,
-                  '${currentTime.difference(lastUpdateTime).inSeconds.toString()} seconds');
-            }
-          }
-
-          if (currentTime.difference(lastUpdateTime).inSeconds >= selectedTime) {
-            if (selectedCoins.contains(symbol) && changePercentage.abs() >= priceChangeThreshold) {
-              String timeDifferenceMessage = selectedTime < 60
-                  ? '${currentTime.difference(lastUpdateTime).inSeconds.toString()} seconds'
-                  : '${currentTime.difference(lastUpdateTime).inMinutes.toString()} min';
-
-              _sendTelegramNotification(
-                  symbol, changePercentage, changeDirection, timeDifferenceMessage);
-            }
-          }
-        }
-
-        previousPrices[symbol] = price;
-        lastUpdateTimes[symbol] = DateTime.now();
-
-        setState(() {
-          coinsList.add({
-            'symbol': symbol,
-            'price': price,
-            'changePercentage': changePercentage,
-          });
-        });
-      }
-    }
+  void _deleteCoins() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.remove('selectedCoins');
+    setState(() => selectedCoins = []);
+    _connectWebSocketBinance();
   }
 
   void _processMessageBinance(dynamic message) {
@@ -163,15 +121,11 @@ class _MyHomePageState extends State<MyHomePage> {
     List<Map<String, dynamic>> updatedCoins = [];
     DateTime currentTime = DateTime.now();
 
-    for (var coin in data) {
-      String symbol = coin['s'];
-      double price = double.parse(coin['c']);
+    if (data is Map<String, dynamic>) {
+      String symbol = data['s'];
+      double price = double.parse(data['c']);
       double changePercentage = 0;
       String changeDirection = '';
-
-      if (!symbol.endsWith(selectedPair)) {
-        continue;
-      }
 
       if (previousPrices.containsKey(symbol)) {
         double prevPrice = previousPrices[symbol]!;
@@ -179,24 +133,19 @@ class _MyHomePageState extends State<MyHomePage> {
         changeDirection = price > prevPrice ? '📈' : '📉';
         DateTime lastUpdateTime = lastUpdateTimes[symbol]!;
 
+        print(currentTime.difference(lastUpdateTime).inSeconds);
         if (currentTime.difference(lastUpdateTime).inSeconds <= quickCheckTime) {
-          if (changePercentage.abs() >= quickChangeThreshold && selectedCoins.contains(symbol)) {
+          if (changePercentage.abs() >= quickChangeThreshold) {
             _sendTelegramNotification(symbol, changePercentage, changeDirection,
                 '${currentTime.difference(lastUpdateTime).inSeconds.toString()} seconds');
           }
         }
 
         if (currentTime.difference(lastUpdateTime).inSeconds >= selectedTime) {
-          if (selectedCoins.contains(symbol) && changePercentage.abs() >= priceChangeThreshold) {
-            String timeDifferenceMessage = '';
-
-            if (selectedTime < 60) {
-              timeDifferenceMessage =
-                  '${currentTime.difference(lastUpdateTime).inSeconds.toString()} seconds';
-            } else {
-              timeDifferenceMessage =
-                  '${currentTime.difference(lastUpdateTime).inMinutes.toString()} min';
-            }
+          if (changePercentage.abs() >= priceChangeThreshold) {
+            String timeDifferenceMessage = selectedTime < 60
+                ? '${currentTime.difference(lastUpdateTime).inSeconds.toString()} seconds'
+                : '${currentTime.difference(lastUpdateTime).inMinutes.toString()} min';
 
             _sendTelegramNotification(
                 symbol, changePercentage, changeDirection, timeDifferenceMessage);
@@ -214,11 +163,9 @@ class _MyHomePageState extends State<MyHomePage> {
       });
     }
 
-    if (isHide) {
-      setState(() {
-        coinsList = updatedCoins;
-      });
-    }
+    setState(() {
+      coinsList = updatedCoins;
+    });
   }
 
   Future<void> _sendTelegramNotification(
@@ -245,12 +192,10 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       MaterialPageRoute(
         builder: (context) => SelectCoinsScreen(
-          availableCoins: coinsList,
+          availableCoins: coinsListForSelect,
           selectedCoins: selectedCoins,
           onCoinsSelected: (List<String> coins) {
-            setState(() {
-              selectedCoins = coins;
-            });
+            setState(() => selectedCoins = coins);
             _saveSelectedCoins();
           },
         ),
@@ -289,23 +234,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     }).toList(),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: DropdownButton<String>(
-                    value: selectedPair,
-                    onChanged: (String? newValue) {
-                      setState(() {
-                        selectedPair = newValue!;
-                      });
-                    },
-                    items: ['USDT', 'BTC', 'ETH'].map<DropdownMenuItem<String>>((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                  ),
-                ),
               ],
             ),
             Padding(
@@ -332,9 +260,18 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             Padding(
               padding: const EdgeInsets.all(8.0),
-              child: ElevatedButton(
-                onPressed: _openSelectCoinsScreen,
-                child: Text('Select Coins for Notifications'),
+              child: Row(
+                children: [
+                  ElevatedButton(
+                    onPressed: _openSelectCoinsScreen,
+                    child: Text('Select Coins for Notifications'),
+                  ),
+                  SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: _deleteCoins,
+                    child: Text('Delete Coins'),
+                  ),
+                ],
               ),
             ),
             Padding(
