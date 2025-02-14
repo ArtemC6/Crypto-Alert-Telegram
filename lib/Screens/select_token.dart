@@ -1,0 +1,95 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+
+class SelectCoinsScreen extends StatefulWidget {
+  final List<Map<String, dynamic>> availableCoins;
+  final List<String> selectedCoins;
+  final Function(List<String>) onCoinsSelected;
+
+  const SelectCoinsScreen({
+    required this.availableCoins,
+    required this.selectedCoins,
+    required this.onCoinsSelected,
+  });
+
+  @override
+  _SelectCoinsScreenState createState() => _SelectCoinsScreenState();
+}
+
+class _SelectCoinsScreenState extends State<SelectCoinsScreen> {
+  late List<String> selectedCoins;
+  late List<Map<String, dynamic>> filteredCoins;
+  String searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    selectedCoins = List.from(widget.selectedCoins);
+    filteredCoins = List.from(widget.availableCoins);
+  }
+
+  void _onSearchQueryChanged(String query) {
+    setState(() {
+      searchQuery = query;
+      filteredCoins = widget.availableCoins
+          .where((coin) => coin['symbol'].toLowerCase().contains(query.toLowerCase()))
+          .toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Select Coins'),
+      ),
+      body: Column(
+        children: [
+          // Поле поиска
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              decoration: InputDecoration(
+                labelText: 'Search',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: _onSearchQueryChanged,
+            ),
+          ),
+
+          Expanded(
+            child: ListView.builder(
+              itemCount: filteredCoins.length,
+              itemBuilder: (context, index) {
+                final coin = filteredCoins[index];
+                return CheckboxListTile(
+                  title: Text(coin['symbol']),
+                  value: selectedCoins.contains(coin['symbol']),
+                  onChanged: (bool? value) {
+                    setState(() {
+                      if (value == true) {
+                        selectedCoins.add(coin['symbol']);
+                      } else {
+                        selectedCoins.remove(coin['symbol']);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: ElevatedButton(
+              onPressed: () {
+                widget.onCoinsSelected(selectedCoins);
+                Navigator.pop(context);
+              },
+              child: Text('Done'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
