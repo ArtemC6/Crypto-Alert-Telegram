@@ -17,7 +17,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel, _okxChannel;
+  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _okxChannel;
 
   late List<Map<String, dynamic>> coinsList;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -41,63 +41,6 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
-  }
-
-  void _connectWebSocketByBit() {
-    if (cryptoListByBit.isEmpty) {
-      _byBitChannel?.sink.close();
-      return;
-    }
-    _byBitChannel?.sink.close();
-    const int maxStreamsPerRequest = 10;
-
-    final chunks = List.generate(
-      (cryptoListByBit.length / maxStreamsPerRequest).ceil(),
-      (i) => cryptoListByBit.sublist(
-        i * maxStreamsPerRequest,
-        (i + 1) * maxStreamsPerRequest > cryptoListByBit.length
-            ? cryptoListByBit.length
-            : (i + 1) * maxStreamsPerRequest,
-      ),
-    );
-
-    for (var chunk in chunks) {
-      final validTopics = chunk
-          .map((coin) => coin.endsWith("USDT") ? 'publicTrade.${coin.toUpperCase()}' : null)
-          .where((topic) => topic != null)
-          .cast<String>()
-          .toList();
-
-      if (validTopics.isNotEmpty) {
-        _byBitChannel =
-            WebSocketChannel.connect(Uri.parse('wss://stream.bybit.com/v5/public/spot'));
-
-        _byBitChannel!.sink.add(jsonEncode({
-          "op": "subscribe",
-          "args": validTopics,
-        }));
-
-        _byBitChannel!.stream.listen(
-          _processMessageByBit,
-          onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketByBit),
-          onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketByBit),
-          cancelOnError: true,
-        );
-      }
-    }
-  }
-
-  void _processMessageByBit(dynamic message) {
-    final data = json.decode(message);
-    if (data is! Map<String, dynamic> || data['topic'] == null || data['data'] == null) return;
-
-    final symbol = data['topic'].split('.')[1];
-    final price = double.parse(data['data'][0]['p']);
-    final timestamp = DateTime.now();
-
-    _storePrice(symbol, price, timestamp);
-    _checkPriceChange(symbol, price, timestamp);
-    if (isHide) _updateCoinsList(symbol, price);
   }
 
   Future<void> _fetchAvailableCoins() async {
@@ -378,20 +321,6 @@ class _MyHomePageState extends State<MyHomePage> {
     await _storageService.savePriceChangeThreshold(value);
   }
 
-  void _toggleByBitConnection() {
-    if (isByBitActive) {
-      print('ByBit connection closed');
-      _byBitChannel?.sink.close();
-      _byBitChannel = null; // Reset the channel after closing it
-    } else {
-      // Подключаемся к Bybit
-      _connectWebSocketByBit();
-    }
-    setState(() {
-      isByBitActive = !isByBitActive;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final filteredCoins = coinsList.where((coin) => selectedCoins.contains(coin['symbol'])).toList()
@@ -461,13 +390,6 @@ class _MyHomePageState extends State<MyHomePage> {
                         });
                       },
                       child: Text(!isHide ? 'Show' : 'Hide ${filteredCoins.length}'),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: ElevatedButton(
-                      onPressed: _toggleByBitConnection,
-                      child: Text(isByBitActive ? 'Disconnect from Bybit' : 'Connect to Bybit'),
                     ),
                   ),
                 ],
