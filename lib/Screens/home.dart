@@ -26,10 +26,8 @@ class _MyHomePageState extends State<MyHomePage> {
   List<String> selectedCoins = [];
   double priceChangeThreshold = 1.0;
   bool isHide = true;
-
   final Map<String, List<Map<String, dynamic>>> _priceHistory = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimes = {};
-
   final Duration _historyDuration = Duration(minutes: 5);
 
   @override
@@ -39,24 +37,24 @@ class _MyHomePageState extends State<MyHomePage> {
     coinsList = [];
     coinsListForSelect = [];
     _loadSelectedCoins();
-    fetchAllCoins();
+    _fetchAvailableCoins();
     // _connectWebSocketByBit();
   }
 
-  Future<void> fetchAllCoins() async {
-    final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final symbols = data['symbols'] as List;
-      setState(() => coinsListForSelect = symbols
-          .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
-          .map((symbol) => {
-                'symbol': symbol['symbol'],
-                'status': symbol['status'],
-              })
-          .toList());
-    } else {
-      throw Exception('Failed to load coins');
+  Future<void> _fetchAvailableCoins() async {
+    try {
+      final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          coinsListForSelect = (data['symbols'] as List)
+              .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
+              .map((symbol) => {'symbol': symbol['symbol']})
+              .toList();
+        });
+      }
+    } catch (e) {
+      print('Error fetching available coins: $e');
     }
   }
 
@@ -67,28 +65,19 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _connectWebSocketBinance() {
-    if (selectedCoins.isEmpty) return;
-    if (_channel != null) {
-      _channel!.sink.close();
+    if (selectedCoins.isEmpty) {
+      _channel?.sink.close();
+      return;
     }
+    _channel?.sink.close();
 
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
-    _channel = WebSocketChannel.connect(
-      Uri.parse('wss://stream.binance.com:9443/ws/$streams'),
-    );
+    _channel = WebSocketChannel.connect(Uri.parse('wss://stream.binance.com:9443/ws/$streams'));
 
     _channel!.stream.listen(
-      (message) {
-        _processMessageBinance(message);
-      },
-      onDone: () {
-        print("WebSocket disconnected. Reconnecting...");
-        Future.delayed(Duration(seconds: 5), _connectWebSocketBinance);
-      },
-      onError: (error) {
-        print("WebSocket error: $error. Reconnecting...");
-        Future.delayed(Duration(seconds: 5), _connectWebSocketBinance);
-      },
+      _processMessageBinance,
+      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       cancelOnError: true,
     );
   }
@@ -219,35 +208,19 @@ class _MyHomePageState extends State<MyHomePage> {
     String time,
     double currentPrice,
   ) async {
-    // Определяем направление изменения цены (вверх или вниз)
-    final String direction = changeDirection > 0 ? '📈' : '📉';
-    final String directionText = changeDirection > 0 ? 'up' : 'down';
-
-    final String message = '''
-🚨 *Price Alert!* 🚨
-  
-🔹 *Symbol:* $symbol
-🔹 *Direction:* $direction $directionText
-🔹 *Change:* ${changeDirection.toStringAsFixed(1)}%
-🔹 *Timeframe:* $time
-
-💵 *Current Price:* $currentPrice
-  ''';
-
-    final String encodedMessage = Uri.encodeComponent(message);
-
+    final String direction = changeDirection > 0 ? '📈 Up' : '📉 Down';
+    final String message =
+        '🚨 *Price Alert!* 🚨\n\n🔹 *Symbol:* $symbol\n🔹 *Change:* ${currentPrice.toStringAsFixed(1)}% ($direction)\n💵 *Current Price:* $currentPrice';
     final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=$encodedMessage&parse_mode=Markdown';
+        'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=${Uri.encodeComponent(message)}&parse_mode=Markdown';
 
     try {
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        print("Telegram notification sent!");
-      } else {
-        print("Failed to send notification to Telegram. Status code: ${response.statusCode}");
+      if (response.statusCode != 200) {
+        print("Failed to send notification: ${response.statusCode}");
       }
     } catch (e) {
-      print("Error sending notification to Telegram: $e");
+      print("Error sending notification: $e");
     }
   }
 
