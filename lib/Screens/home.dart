@@ -17,13 +17,14 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel? _channel, _byBitChannel;
+  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel;
   late List<Map<String, dynamic>> coinsList;
   late List<Map<String, dynamic>> coinsListForSelect;
 
   List<String> selectedCoins = [];
   double priceChangeThreshold = 1.0;
-  bool isHide = true;
+  bool isHide = true, isByBitActive = false;
+
   final Map<String, List<Map<String, dynamic>>> _priceHistory = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimes = {};
   final Duration _historyDuration = Duration(minutes: 5);
@@ -37,67 +38,53 @@ class _MyHomePageState extends State<MyHomePage> {
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
   }
-
   void _connectWebSocketByBit() {
-    if (selectedCoins.isEmpty) {
+    if (cryptoListByBit.isEmpty) {
       _byBitChannel?.sink.close();
       return;
     }
-    _byBitChannel?.sink.close();
-
-    // Split the coins into chunks of 10 or fewer
+    _byBitChannel?.sink.close();  // Close any previous connection
     const int maxStreamsPerRequest = 10;
-    final chunks = <List<String>>[];
 
-    for (int i = 0; i < selectedCoins.length; i += maxStreamsPerRequest) {
-      chunks.add(selectedCoins.sublist(
-          i,
-          i + maxStreamsPerRequest > selectedCoins.length
-              ? selectedCoins.length
-              : i + maxStreamsPerRequest));
-    }
+    final chunks = List.generate(
+      (cryptoListByBit.length / maxStreamsPerRequest).ceil(),
+          (i) => cryptoListByBit.sublist(
+        i * maxStreamsPerRequest,
+        (i + 1) * maxStreamsPerRequest > cryptoListByBit.length
+            ? cryptoListByBit.length
+            : (i + 1) * maxStreamsPerRequest,
+      ),
+    );
 
-    // Subscribe to each chunk of streams
     for (var chunk in chunks) {
-      List<String> validTopics = chunk
-          .map((coin) {
-            if (coin.endsWith("USDT")) {
-              // Ensure the coin is a valid USDT pair
-              return 'publicTrade.${coin.toUpperCase()}';
-            }
-            return null; // Filter out invalid symbols
-          })
+      final validTopics = chunk
+          .map((coin) => coin.endsWith("USDT") ? 'publicTrade.${coin.toUpperCase()}' : null)
           .where((topic) => topic != null)
           .cast<String>()
           .toList();
 
       if (validTopics.isNotEmpty) {
-        WebSocketChannel channel =
+        _byBitChannel =
             WebSocketChannel.connect(Uri.parse('wss://stream.bybit.com/v5/public/spot'));
 
-        channel.sink.add(jsonEncode({
+        _byBitChannel!.sink.add(jsonEncode({
           "op": "subscribe",
           "args": validTopics,
         }));
 
-        channel.stream.listen(
+        _byBitChannel!.stream.listen(
           _processMessageByBit,
-          onDone: () => Future.delayed(const Duration(seconds: 5), () => _connectWebSocketByBit()),
-          onError: (error) =>
-              Future.delayed(const Duration(seconds: 5), () => _connectWebSocketByBit()),
+          onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketByBit),
+          onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketByBit),
           cancelOnError: true,
         );
-
-        // Store the channel somewhere if you need to manage or close it later
-        // For example, you might want to add it to a list of channels:
-        // _channels.add(channel);
       }
     }
   }
 
+
+
   void _processMessageByBit(dynamic message) {
-    print('_____________________');
-    print(message);
     final data = json.decode(message);
     if (data is! Map<String, dynamic> || data['topic'] == null || data['data'] == null) return;
 
@@ -132,26 +119,38 @@ class _MyHomePageState extends State<MyHomePage> {
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
-    // _connectWebSocketBinance();
-    _connectWebSocketByBit();
+    _connectWebSocketBinance();
+    // _connectWebSocketByBit();
   }
 
   void _connectWebSocketBinance() {
     if (selectedCoins.isEmpty) {
-      _channel?.sink.close();
+      _channelSpotBinance?.sink.close();
+      _channelStopFuture?.sink.close();
       return;
     }
-    _channel?.sink.close();
+    _channelSpotBinance?.sink.close();
+    _channelStopFuture?.sink.close();
 
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
-    _channel = WebSocketChannel.connect(Uri.parse('wss://stream.binance.com:9443/ws/$streams'));
+    _channelSpotBinance =
+        WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
+    // _channelStopFuture =
+    //     WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
-    _channel!.stream.listen(
+    _channelSpotBinance!.stream.listen(
       _processMessageBinance,
       onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       cancelOnError: true,
     );
+
+    // _channelStopFuture!.stream.listen(
+    //   _processMessageBinance,
+    //   onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   cancelOnError: true,
+    // );
   }
 
   void _saveSelectedCoins() async {
@@ -288,6 +287,10 @@ class _MyHomePageState extends State<MyHomePage> {
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
     final String bybitUrl = 'https://www.bybit.com/en/trade/spot/${symbol.toLowerCase()}';
 
+    // Ссылка для открытия в приложении Binance (используем веб-ссылку)
+    final String binanceAppUrl =
+        'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}?layout=pro';
+
     final String message = '''
 🚨 *Price Alert!* 🚨
   
@@ -298,8 +301,10 @@ class _MyHomePageState extends State<MyHomePage> {
 
 💵 *Current Price:* $currentPrice
 
-🔗 [View on Binance]($binanceUrl)  
+🔗 [View on Binance Future]($binanceUrl)  
+🔗 [View on Binance] Spot]($binanceAppUrl)
 🔗 [View on Bybit]($bybitUrl)
+
   ''';
 
     final String encodedMessage = Uri.encodeComponent(message);
@@ -346,6 +351,21 @@ class _MyHomePageState extends State<MyHomePage> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     prefs.setDouble('priceChangeThreshold', value);
   }
+
+  void _toggleByBitConnection() {
+    if (isByBitActive) {
+      print('ByBit connection closed');
+      _byBitChannel?.sink.close();
+      _byBitChannel = null;  // Reset the channel after closing it
+    } else {
+      // Подключаемся к Bybit
+      _connectWebSocketByBit();
+    }
+    setState(() {
+      isByBitActive = !isByBitActive;
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -404,15 +424,28 @@ class _MyHomePageState extends State<MyHomePage> {
                 style: TextStyle(fontSize: 14, color: Colors.white),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    isHide = !isHide;
-                  });
-                },
-                child: Text(!isHide ? 'Show' : 'Hide ${filteredCoins.length}'),
+            Center(
+              child: Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          isHide = !isHide;
+                        });
+                      },
+                      child: Text(!isHide ? 'Show' : 'Hide ${filteredCoins.length}'),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: ElevatedButton(
+                      onPressed: _toggleByBitConnection,
+                      child: Text(isByBitActive ? 'Disconnect from Bybit' : 'Connect to Bybit'),
+                    ),
+                  ),
+                ],
               ),
             ),
             if (isHide)
