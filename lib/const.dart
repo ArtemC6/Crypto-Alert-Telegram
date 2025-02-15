@@ -51,3 +51,14 @@ const cryptoListByBit = [
 
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
 const chatId = '1288898832';
+
+const timeFrames = [
+  Duration(seconds: 1),
+  Duration(seconds: 3),
+  Duration(seconds: 5),
+  Duration(seconds: 15),
+  Duration(seconds: 30),
+  Duration(minutes: 1),
+  Duration(minutes: 3),
+  Duration(minutes: 5),
+];

@@ -4,10 +4,10 @@ import 'dart:convert';
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../const.dart';
+import '../services/storage.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -17,7 +17,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel, _coinbaseChannel;
+  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel, _okxChannel;
 
   late List<Map<String, dynamic>> coinsList;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -30,9 +30,12 @@ class _MyHomePageState extends State<MyHomePage> {
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimes = {};
   final Duration _historyDuration = Duration(minutes: 5);
 
+  late final StorageService _storageService;
+
   @override
   void initState() {
     super.initState();
+    _storageService = StorageService();
     coinsList = [];
     coinsListForSelect = [];
     _loadSelectedCoins();
@@ -40,57 +43,12 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadPriceChangeThreshold();
   }
 
-  void _connectWebSocketCoinbase() {
-    if (selectedCoins.isEmpty) {
-      _coinbaseChannel?.sink.close();
-      return;
-    }
-
-    _coinbaseChannel?.sink.close(); // Close any previous connection
-
-    final topics = selectedCoins.map((coin) {
-      return 'market:$coin-ticker'; // Subscribe to price updates for selected coins
-    }).toList();
-
-    _coinbaseChannel = WebSocketChannel.connect(
-      Uri.parse('wss://ws-feed.pro.coinbase.com'),
-    );
-
-    _coinbaseChannel!.sink.add(jsonEncode({
-      'type': 'subscribe',
-      'channels': [
-        {'name': 'ticker', 'product_ids': topics}
-      ]
-    }));
-
-    _coinbaseChannel!.stream.listen(
-      _processMessageCoinbase,
-      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketCoinbase),
-      onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketCoinbase),
-      cancelOnError: true,
-    );
-  }
-
-  void _processMessageCoinbase(dynamic message) {
-    final data = json.decode(message);
-    if (data is! Map<String, dynamic> || data['type'] != 'ticker' || data['price'] == null) return;
-
-    final symbol = data['product_id'].split('-')[0]; // Extract the symbol from the product_id
-    final price = double.parse(data['price']);
-    final timestamp = DateTime.now();
-
-    _storePrice(symbol, price, timestamp); // Store the price data
-    _checkPriceChange(symbol, price, timestamp); // Check for price change notifications
-
-    if (isHide) _updateCoinsList(symbol, price); // Update the UI with the new price
-  }
-
   void _connectWebSocketByBit() {
     if (cryptoListByBit.isEmpty) {
       _byBitChannel?.sink.close();
       return;
     }
-    _byBitChannel?.sink.close(); // Close any previous connection
+    _byBitChannel?.sink.close();
     const int maxStreamsPerRequest = 10;
 
     final chunks = List.generate(
@@ -159,14 +117,65 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  void _loadSelectedCoins() async {
-    setState(() => selectedCoins = cryptoList);
+  void _connectWebSocketOKX() {
+    if (selectedCoins.isEmpty) {
+      print('No coins selected for OKX');
+      _okxChannel?.sink.close();
+      return;
+    }
 
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
+    _okxChannel?.sink.close();
+
+    final validCoins = selectedCoins
+        .where((coin) => coin.endsWith("USDT"))
+        .map((coin) => coin.replaceAll("USDT", "-USDT"))
+        .toList();
+
+    _okxChannel = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
+
+    _okxChannel!.sink.add(jsonEncode({
+      "op": "subscribe",
+      "args": validCoins.map((symbol) => {"channel": "tickers", "instId": symbol}).toList()
+    }));
+
+    _okxChannel!.stream.listen(
+      _processMessageOKX,
+      onDone: () {
+        print('OKX WebSocket connection closed. Reconnecting...');
+        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+      },
+      onError: (error) {
+        print('OKX WebSocket error: $error. Reconnecting...');
+        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+      },
+      cancelOnError: true,
+    );
+  }
+
+  void _processMessageOKX(dynamic message) {
+    print('Received message from OKX: $message');
+    final data = json.decode(message);
+    if (data is! Map<String, dynamic> || data['arg'] == null || data['data'] == null) {
+      print('Invalid message format or not a ticker');
+      return;
+    }
+
+    final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
+    final price = double.parse(data['data'][0]['last']);
+    final timestamp = DateTime.now();
+
+    print('Processing OKX data: $symbol, $price, $timestamp');
+
+    _storePrice(symbol, price, timestamp);
+    _checkPriceChange(symbol, price, timestamp);
+    if (isHide) _updateCoinsList(symbol, price);
+  }
+
+  void _loadSelectedCoins() async {
+    selectedCoins = await _storageService.loadSelectedCoins();
+    setState(() => selectedCoins = selectedCoins);
     _connectWebSocketBinance();
-    // _connectWebSocketByBit();
-    // _connectWebSocketCoinbase();
+    // _connectWebSocketOKX();
   }
 
   void _connectWebSocketBinance() {
@@ -181,8 +190,6 @@ class _MyHomePageState extends State<MyHomePage> {
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
     _channelSpotBinance =
         WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
-    // _channelStopFuture =
-    //     WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
     _channelSpotBinance!.stream.listen(
       _processMessageBinance,
@@ -190,24 +197,15 @@ class _MyHomePageState extends State<MyHomePage> {
       onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       cancelOnError: true,
     );
-
-    // _channelStopFuture!.stream.listen(
-    //   _processMessageBinance,
-    //   onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   cancelOnError: true,
-    // );
   }
 
   void _saveSelectedCoins() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    prefs.setStringList('selectedCoins', selectedCoins);
+    await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
   }
 
   void _deleteCoins() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    prefs.remove('selectedCoins');
+    await _storageService.deleteCoins();
     setState(() => selectedCoins = []);
     _connectWebSocketBinance();
   }
@@ -250,17 +248,6 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _checkPriceChange(String symbol, double currentPrice, DateTime timestamp) {
-    const timeFrames = [
-      Duration(seconds: 1),
-      Duration(seconds: 3),
-      Duration(seconds: 5),
-      Duration(seconds: 15),
-      Duration(seconds: 30),
-      Duration(minutes: 1),
-      Duration(minutes: 3),
-      Duration(minutes: 5),
-    ];
-
     for (final timeFrame in timeFrames) {
       _checkTimeFrame(symbol, currentPrice, timestamp, timeFrame);
     }
@@ -345,7 +332,6 @@ class _MyHomePageState extends State<MyHomePage> {
 💵 *Current Price:* $currentPrice
 
 
-
   ''';
 
     final String encodedMessage = Uri.encodeComponent(message);
@@ -382,15 +368,14 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _loadPriceChangeThreshold() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
+    priceChangeThreshold = await _storageService.loadPriceChangeThreshold();
     setState(() {
-      priceChangeThreshold = prefs.getDouble('priceChangeThreshold') ?? 1.0;
+      priceChangeThreshold = priceChangeThreshold;
     });
   }
 
   void _savePriceChangeThreshold(double value) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    prefs.setDouble('priceChangeThreshold', value);
+    await _storageService.savePriceChangeThreshold(value);
   }
 
   void _toggleByBitConnection() {
