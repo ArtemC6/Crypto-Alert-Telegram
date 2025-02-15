@@ -17,7 +17,8 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel;
+  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _byBitChannel, _coinbaseChannel;
+
   late List<Map<String, dynamic>> coinsList;
   late List<Map<String, dynamic>> coinsListForSelect;
 
@@ -38,17 +39,63 @@ class _MyHomePageState extends State<MyHomePage> {
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
   }
+
+  void _connectWebSocketCoinbase() {
+    if (selectedCoins.isEmpty) {
+      _coinbaseChannel?.sink.close();
+      return;
+    }
+
+    _coinbaseChannel?.sink.close(); // Close any previous connection
+
+    final topics = selectedCoins.map((coin) {
+      return 'market:$coin-ticker'; // Subscribe to price updates for selected coins
+    }).toList();
+
+    _coinbaseChannel = WebSocketChannel.connect(
+      Uri.parse('wss://ws-feed.pro.coinbase.com'),
+    );
+
+    _coinbaseChannel!.sink.add(jsonEncode({
+      'type': 'subscribe',
+      'channels': [
+        {'name': 'ticker', 'product_ids': topics}
+      ]
+    }));
+
+    _coinbaseChannel!.stream.listen(
+      _processMessageCoinbase,
+      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketCoinbase),
+      onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketCoinbase),
+      cancelOnError: true,
+    );
+  }
+
+  void _processMessageCoinbase(dynamic message) {
+    final data = json.decode(message);
+    if (data is! Map<String, dynamic> || data['type'] != 'ticker' || data['price'] == null) return;
+
+    final symbol = data['product_id'].split('-')[0]; // Extract the symbol from the product_id
+    final price = double.parse(data['price']);
+    final timestamp = DateTime.now();
+
+    _storePrice(symbol, price, timestamp); // Store the price data
+    _checkPriceChange(symbol, price, timestamp); // Check for price change notifications
+
+    if (isHide) _updateCoinsList(symbol, price); // Update the UI with the new price
+  }
+
   void _connectWebSocketByBit() {
     if (cryptoListByBit.isEmpty) {
       _byBitChannel?.sink.close();
       return;
     }
-    _byBitChannel?.sink.close();  // Close any previous connection
+    _byBitChannel?.sink.close(); // Close any previous connection
     const int maxStreamsPerRequest = 10;
 
     final chunks = List.generate(
       (cryptoListByBit.length / maxStreamsPerRequest).ceil(),
-          (i) => cryptoListByBit.sublist(
+      (i) => cryptoListByBit.sublist(
         i * maxStreamsPerRequest,
         (i + 1) * maxStreamsPerRequest > cryptoListByBit.length
             ? cryptoListByBit.length
@@ -81,8 +128,6 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
   }
-
-
 
   void _processMessageByBit(dynamic message) {
     final data = json.decode(message);
@@ -121,6 +166,7 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
     _connectWebSocketBinance();
     // _connectWebSocketByBit();
+    // _connectWebSocketCoinbase();
   }
 
   void _connectWebSocketBinance() {
@@ -205,6 +251,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _checkPriceChange(String symbol, double currentPrice, DateTime timestamp) {
     const timeFrames = [
+      Duration(seconds: 1),
+      Duration(seconds: 3),
       Duration(seconds: 5),
       Duration(seconds: 15),
       Duration(seconds: 30),
@@ -285,11 +333,6 @@ class _MyHomePageState extends State<MyHomePage> {
     // Формируем ссылки на Binance и Bybit
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
-    final String bybitUrl = 'https://www.bybit.com/en/trade/spot/${symbol.toLowerCase()}';
-
-    // Ссылка для открытия в приложении Binance (используем веб-ссылку)
-    final String binanceAppUrl =
-        'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}?layout=pro';
 
     final String message = '''
 🚨 *Price Alert!* 🚨
@@ -301,9 +344,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
 💵 *Current Price:* $currentPrice
 
-🔗 [View on Binance Future]($binanceUrl)  
-🔗 [View on Binance] Spot]($binanceAppUrl)
-🔗 [View on Bybit]($bybitUrl)
+
 
   ''';
 
@@ -356,7 +397,7 @@ class _MyHomePageState extends State<MyHomePage> {
     if (isByBitActive) {
       print('ByBit connection closed');
       _byBitChannel?.sink.close();
-      _byBitChannel = null;  // Reset the channel after closing it
+      _byBitChannel = null; // Reset the channel after closing it
     } else {
       // Подключаемся к Bybit
       _connectWebSocketByBit();
@@ -365,7 +406,6 @@ class _MyHomePageState extends State<MyHomePage> {
       isByBitActive = !isByBitActive;
     });
   }
-
 
   @override
   Widget build(BuildContext context) {
