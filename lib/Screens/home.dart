@@ -36,7 +36,78 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
-    // _connectWebSocketByBit();
+  }
+
+  void _connectWebSocketByBit() {
+    if (selectedCoins.isEmpty) {
+      _byBitChannel?.sink.close();
+      return;
+    }
+    _byBitChannel?.sink.close();
+
+    // Split the coins into chunks of 10 or fewer
+    const int maxStreamsPerRequest = 10;
+    final chunks = <List<String>>[];
+
+    for (int i = 0; i < selectedCoins.length; i += maxStreamsPerRequest) {
+      chunks.add(selectedCoins.sublist(
+          i,
+          i + maxStreamsPerRequest > selectedCoins.length
+              ? selectedCoins.length
+              : i + maxStreamsPerRequest));
+    }
+
+    // Subscribe to each chunk of streams
+    for (var chunk in chunks) {
+      List<String> validTopics = chunk
+          .map((coin) {
+            if (coin.endsWith("USDT")) {
+              // Ensure the coin is a valid USDT pair
+              return 'publicTrade.${coin.toUpperCase()}';
+            }
+            return null; // Filter out invalid symbols
+          })
+          .where((topic) => topic != null)
+          .cast<String>()
+          .toList();
+
+      if (validTopics.isNotEmpty) {
+        WebSocketChannel channel =
+            WebSocketChannel.connect(Uri.parse('wss://stream.bybit.com/v5/public/spot'));
+
+        channel.sink.add(jsonEncode({
+          "op": "subscribe",
+          "args": validTopics,
+        }));
+
+        channel.stream.listen(
+          _processMessageByBit,
+          onDone: () => Future.delayed(const Duration(seconds: 5), () => _connectWebSocketByBit()),
+          onError: (error) =>
+              Future.delayed(const Duration(seconds: 5), () => _connectWebSocketByBit()),
+          cancelOnError: true,
+        );
+
+        // Store the channel somewhere if you need to manage or close it later
+        // For example, you might want to add it to a list of channels:
+        // _channels.add(channel);
+      }
+    }
+  }
+
+  void _processMessageByBit(dynamic message) {
+    print('_____________________');
+    print(message);
+    final data = json.decode(message);
+    if (data is! Map<String, dynamic> || data['topic'] == null || data['data'] == null) return;
+
+    final symbol = data['topic'].split('.')[1];
+    final price = double.parse(data['data'][0]['p']);
+    final timestamp = DateTime.now();
+
+    _storePrice(symbol, price, timestamp);
+    _checkPriceChange(symbol, price, timestamp);
+    if (isHide) _updateCoinsList(symbol, price);
   }
 
   Future<void> _fetchAvailableCoins() async {
@@ -61,7 +132,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
-    _connectWebSocketBinance();
+    // _connectWebSocketBinance();
+    _connectWebSocketByBit();
   }
 
   void _connectWebSocketBinance() {
@@ -340,7 +412,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     isHide = !isHide;
                   });
                 },
-                child: Text(!isHide ? 'Show' : 'Hide'),
+                child: Text(!isHide ? 'Show' : 'Hide ${filteredCoins.length}'),
               ),
             ),
             if (isHide)
