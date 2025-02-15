@@ -208,19 +208,35 @@ class _MyHomePageState extends State<MyHomePage> {
     String time,
     double currentPrice,
   ) async {
-    final String direction = changeDirection > 0 ? '📈 Up' : '📉 Down';
-    final String message =
-        '🚨 *Price Alert!* 🚨\n\n🔹 *Symbol:* $symbol\n🔹 *Change:* ${currentPrice.toStringAsFixed(1)}% ($direction)\n💵 *Current Price:* $currentPrice';
+    // Определяем направление изменения цены (вверх или вниз)
+    final String direction = changeDirection > 0 ? '📈' : '📉';
+    final String directionText = changeDirection > 0 ? 'up' : 'down';
+
+    final String message = '''
+🚨 *Price Alert!* 🚨
+  
+🔹 *Symbol:* $symbol
+🔹 *Direction:* $direction $directionText
+🔹 *Change:* ${changeDirection.toStringAsFixed(1)}%
+🔹 *Timeframe:* $time
+
+💵 *Current Price:* $currentPrice
+  ''';
+
+    final String encodedMessage = Uri.encodeComponent(message);
+
     final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=${Uri.encodeComponent(message)}&parse_mode=Markdown';
+        'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=$encodedMessage&parse_mode=Markdown';
 
     try {
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) {
-        print("Failed to send notification: ${response.statusCode}");
+      if (response.statusCode == 200) {
+        print("Telegram notification sent!");
+      } else {
+        print("Failed to send notification to Telegram. Status code: ${response.statusCode}");
       }
     } catch (e) {
-      print("Error sending notification: $e");
+      print("Error sending notification to Telegram: $e");
     }
   }
 
