@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../const.dart';
+
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
 
@@ -16,12 +18,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   WebSocketChannel? _channel, _byBitChannel;
-
-  late Map<String, DateTime> lastUpdateTimes;
   late List<Map<String, dynamic>> coinsList;
   late List<Map<String, dynamic>> coinsListForSelect;
-  final String telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
-  final String chatId = '1288898832';
 
   List<String> selectedCoins = [];
   double priceChangeThreshold = 1.0;
@@ -33,11 +31,11 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    lastUpdateTimes = {};
     coinsList = [];
     coinsListForSelect = [];
     _loadSelectedCoins();
     _fetchAvailableCoins();
+    _loadPriceChangeThreshold();
     // _connectWebSocketByBit();
   }
 
@@ -59,6 +57,8 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _loadSelectedCoins() async {
+    setState(() => selectedCoins = cryptoList);
+
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() => selectedCoins = prefs.getStringList('selectedCoins') ?? []);
     _connectWebSocketBinance();
@@ -208,19 +208,26 @@ class _MyHomePageState extends State<MyHomePage> {
     String time,
     double currentPrice,
   ) async {
-    // Определяем направление изменения цены (вверх или вниз)
     final String direction = changeDirection > 0 ? '📈' : '📉';
     final String directionText = changeDirection > 0 ? 'up' : 'down';
+
+    // Формируем ссылки на Binance и Bybit
+    final String binanceUrl =
+        'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
+    final String bybitUrl = 'https://www.bybit.com/en/trade/spot/${symbol.toLowerCase()}';
 
     final String message = '''
 🚨 *Price Alert!* 🚨
   
-🔹 *Symbol:* $symbol
+🔹 *Symbol:* [$symbol]($binanceUrl)
 🔹 *Direction:* $direction $directionText
 🔹 *Change:* ${changeDirection.toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
 
 💵 *Current Price:* $currentPrice
+
+🔗 [View on Binance]($binanceUrl)  
+🔗 [View on Bybit]($bybitUrl)
   ''';
 
     final String encodedMessage = Uri.encodeComponent(message);
@@ -256,6 +263,18 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  void _loadPriceChangeThreshold() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      priceChangeThreshold = prefs.getDouble('priceChangeThreshold') ?? 1.0;
+    });
+  }
+
+  void _savePriceChangeThreshold(double value) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.setDouble('priceChangeThreshold', value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final filteredCoins = coinsList.where((coin) => selectedCoins.contains(coin['symbol'])).toList()
@@ -282,9 +301,8 @@ class _MyHomePageState extends State<MyHomePage> {
                       divisions: 99,
                       label: '${priceChangeThreshold.toStringAsFixed(1)}%',
                       onChanged: (double value) {
-                        setState(() {
-                          priceChangeThreshold = value;
-                        });
+                        setState(() => priceChangeThreshold = value);
+                        _savePriceChangeThreshold(value);
                       },
                     ),
                   ),

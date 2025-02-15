@@ -43,9 +43,6 @@ dev_dependencies:
   web_socket_channel: ^3.0.2
   shared_preferences: ^2.5.2
 
-
-
-
 # The following section is specific to Flutter packages.
 flutter:
 
