@@ -28,13 +28,16 @@ class _MyHomePageState extends State<MyHomePage> {
   bool isHide = true, isOKXConnected = false;
 
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
-  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesBinance = {};
+  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
+  final Map<String, DateTime> _lastNotificationTimes = {};
 
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
-  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesOKX = {};
+
+  // final Map<String, Map<Duration, DateTime>> _lastNotificationTimesOKX = {};
 
   late final StorageService _storageService;
   Map<String, Map<String, dynamic>> _orderBooks = {};
+  final Set<String> _shownNotifications = {}; // Store notifications that have been shown
 
   @override
   void initState() {
@@ -80,61 +83,93 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
 
-    final symbol = data['s'];
-    final bids = data['b'].cast<List<dynamic>>();
-    final asks = data['a'].cast<List<dynamic>>();
-    final orderBook = {'symbol': symbol, 'bids': bids, 'asks': asks};
+    final symbol = data['s']; // Название монеты (например, PEPEUSDT)
+    final bids = data['b'].cast<List<dynamic>>(); // Биды (покупатели)
+    final asks = data['a'].cast<List<dynamic>>(); // Аски (продавцы)
 
-    // Assuming you have a method to get the last order book for comparison
-    final lastOrderBook = _orderBooks[symbol];
+    // Получаем текущую цену (последний ордер в стакане)
+    final currentPrice = double.tryParse(asks.isNotEmpty ? asks[0][0] : bids[0][0]) ?? 0.0;
 
-    // double currentSpread = double.parse(asks[0][0]) - double.parse(bids[0][0]);
-    // if (lastOrderBook != null) {
-    //   double lastSpread = double.parse(lastOrderBook['asks'][0][0]) - double.parse(lastOrderBook['bids'][0][0]);
-    //   double spreadPercentageChange = ((currentSpread - lastSpread) / lastSpread) * 100;
-    //
-    //   if (spreadPercentageChange.abs() > 5) { // 5% change threshold
-    //     _sendNotification('Spread Change Alert', 'Spread for $symbol changed by ${spreadPercentageChange.toStringAsFixed(2)}%');
-    //   }
-    // }
-
-    int currentDepth = bids.length + asks.length;
-    if (lastOrderBook != null) {
-      int lastDepth = lastOrderBook['bids'].length + lastOrderBook['asks'].length;
-      int depthChange = currentDepth - lastDepth;
-
-      if (depthChange.abs() > 10) {
-        // Change in depth by 10 levels
-        _sendNotification(
-            'Order Book Depth Alert', 'Depth for $symbol changed by $depthChange levels');
-      }
-    }
-
-    // // Volume alert logic
-    // if (lastOrderBook != null) {
-    //   double lastBestBidVolume = double.parse(lastOrderBook['bids'][0][1]);
-    //   double currentBestBidVolume = double.parse(bids[0][1]);
-    //   double lastBestAskVolume = double.parse(lastOrderBook['asks'][0][1]);
-    //   double currentBestAskVolume = double.parse(asks[0][1]);
-    //
-    //   double volumeThreshold = 1000;  // Example threshold for volume change
-    //
-    //   if (currentBestBidVolume - lastBestBidVolume > volumeThreshold) {
-    //     _sendNotification('High Bid Volume Alert', 'Significant bid volume increase for $symbol');
-    //   }
-    //   if (currentBestAskVolume - lastBestAskVolume > volumeThreshold) {
-    //     _sendNotification('High Ask Volume Alert', 'Significant ask volume increase for $symbol');
-    //   }
-    //   // You can add more conditions here for volume decrease or other metrics.
-    // }
+    // Обновляем стакан ордеров
+    final orderBook = {
+      'symbol': symbol,
+      'bids': bids,
+      'asks': asks,
+      'timestamp': DateTime.now().millisecondsSinceEpoch, // Время обновления
+    };
 
     setState(() {
       _orderBooks[symbol] = orderBook;
     });
+
+    List<dynamic> oldestOrder = [];
+    double lowestValue = double.infinity;
+    String action = ''; // Тикер на покупку или продажу
+    double volumeInUsdt = 0.0;
+
+    // Проверяем биды
+    for (final bid in bids) {
+      if (bid.length > 1) {
+        final bidValue = double.tryParse(bid[1]) ?? double.infinity;
+        if (bidValue < lowestValue) {
+          lowestValue = bidValue;
+          oldestOrder = bid;
+          action = 'BUY'; // Если ордер из бидов, то это покупка
+          volumeInUsdt = (double.tryParse(bid[1]) ?? 0.0) * (double.tryParse(bid[0]) ?? 0.0);
+        }
+      }
+    }
+
+    // Проверяем аски
+    for (final ask in asks) {
+      if (ask.length > 1) {
+        final askValue = double.tryParse(ask[1]) ?? double.infinity;
+        if (askValue < lowestValue) {
+          lowestValue = askValue;
+          oldestOrder = ask;
+          action = 'SELL'; // Если ордер из асков, то это продажа
+          volumeInUsdt = (double.tryParse(ask[1]) ?? 0.0) * (double.tryParse(ask[0]) ?? 0.0);
+        }
+      }
+    }
+
+    // Предполагаем, что oldestOrder[0] - это цена ордера
+    if (oldestOrder.isNotEmpty) {
+      final orderPrice = double.tryParse(oldestOrder[0]) ?? 0.0;
+      final priceDifference = (orderPrice - currentPrice).abs();
+      if (orderPrice != currentPrice) {
+        // Рассчитываем процентное изменение
+        double percentageDifference = (priceDifference / currentPrice) * 100;
+
+        // Показываем уведомление только если процентное изменение больше 1%
+        if (percentageDifference >= 1 && volumeInUsdt > 10000) {
+          final notificationContent =
+              "$symbol $action Цена $orderPrice - текущая $currentPrice, разница"
+              " ${priceDifference.toStringAsFixed(2)} (${percentageDifference.toStringAsFixed(2)}%), Объем ${volumeInUsdt.toStringAsFixed(2)} USDT";
+          if (!_shownNotifications.contains(notificationContent)) {
+            print(notificationContent);
+            _shownNotifications.add(notificationContent); // Add to shown notifications
+            // showNotification(symbol, action, orderPrice, priceDifference, currentPrice,
+            //     percentageDifference, volumeInUsdt);
+          }
+        }
+      }
+    }
   }
 
-  void _sendNotification(String title, String message) {
-    print('Notification: $title - $message');
+  void showNotification(
+    String symbol,
+    String action,
+    double orderPrice,
+    double priceDifference,
+    double currentPrice,
+    double percentageDifference,
+    double volumeInUsdt,
+  ) {
+    String notification =
+        "$symbol $action Цена $orderPrice - текущая $currentPrice, разница ${priceDifference.toStringAsFixed(2)}"
+        " (${percentageDifference.toStringAsFixed(2)}%), Объем ${volumeInUsdt.toStringAsFixed(1)} USDT";
+    print(notification); // Временное решение для отладки
   }
 
   Future<void> _fetchTopGainers() async {
@@ -239,7 +274,7 @@ class _MyHomePageState extends State<MyHomePage> {
     selectedCoins = selectedCoins.toSet().toList();
     setState(() {});
     _connectWebSocketBinance();
-    // _connectWebSocketOrderBookBinance();
+    _connectWebSocketOrderBookBinance();
   }
 
   void _connectWebSocketBinance() {
@@ -296,7 +331,7 @@ class _MyHomePageState extends State<MyHomePage> {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 10).inMinutes);
+          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 15).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -320,7 +355,7 @@ class _MyHomePageState extends State<MyHomePage> {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 10).inMinutes);
+          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 15).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -364,29 +399,31 @@ class _MyHomePageState extends State<MyHomePage> {
 
     double threshold = priceChangeThreshold;
     if (lowVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.75;
+      threshold = priceChangeThreshold * 0.65;
+    }
+
+    if (mediumVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.80;
     }
 
     if (changePercent.abs() >= threshold) {
-      final lastNotificationTime = _lastNotificationTimesBinance[symbol]?[timeFrame];
-      if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
-        history.remove(oldPriceData);
+      final lastNotificationTime = _lastNotificationTimesAll[symbol]?[timeFrame];
+      final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
-        final timeDifferenceMessage =
-            _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
+      if (lastNotificationTimeForSymbol == null ||
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 5)) {
+        if (lastNotificationTime == null ||
+            timestamp.difference(lastNotificationTime) >= timeFrame) {
+          final timeDifferenceMessage =
+              _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
-        String volatilityCategory = 'Unknown Volatility';
-        if (highVolatilityCrypto.contains(symbol)) {
-          volatilityCategory = 'High Volatility';
-        } else if (lowVolatilityCrypto.contains(symbol)) {
-          volatilityCategory = 'Low Volatility';
+          _sendTelegramNotification(
+              symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'Binance');
+
+          _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
+          _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
+          _lastNotificationTimes[symbol] = timestamp;
         }
-
-        _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-            currentPrice, 'Binance ($volatilityCategory)');
-
-        _lastNotificationTimesBinance.putIfAbsent(symbol, () => {});
-        _lastNotificationTimesBinance[symbol]![timeFrame] = timestamp;
       }
     }
   }
@@ -409,29 +446,31 @@ class _MyHomePageState extends State<MyHomePage> {
 
     double threshold = priceChangeThreshold;
     if (lowVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.75;
+      threshold = priceChangeThreshold * 0.65;
+    }
+
+    if (mediumVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.80;
     }
 
     if (changePercent.abs() >= threshold) {
-      final lastNotificationTime = _lastNotificationTimesOKX[symbol]?[timeFrame];
-      if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
-        history.remove(oldPriceData);
+      final lastNotificationTime = _lastNotificationTimesAll[symbol]?[timeFrame];
+      final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
-        final timeDifferenceMessage =
-            _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
+      if (lastNotificationTimeForSymbol == null ||
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 5)) {
+        if (lastNotificationTime == null ||
+            timestamp.difference(lastNotificationTime) >= timeFrame) {
+          final timeDifferenceMessage =
+              _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
-        String volatilityCategory = 'Unknown Volatility';
-        if (highVolatilityCrypto.contains(symbol)) {
-          volatilityCategory = 'High Volatility';
-        } else if (lowVolatilityCrypto.contains(symbol)) {
-          volatilityCategory = 'Low Volatility';
+          _sendTelegramNotification(
+              symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'OKX');
+
+          _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
+          _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
+          _lastNotificationTimes[symbol] = timestamp;
         }
-
-        _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-            currentPrice, 'Binance ($volatilityCategory)');
-
-        _lastNotificationTimesOKX.putIfAbsent(symbol, () => {});
-        _lastNotificationTimesOKX[symbol]![timeFrame] = timestamp;
       }
     }
   }
@@ -482,16 +521,14 @@ class _MyHomePageState extends State<MyHomePage> {
     String exchange,
   ) async {
     final String direction = changeDirection > 0 ? '📈' : '📉';
-    final String directionText = changeDirection > 0 ? 'up' : 'down';
 
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
     final String message = '''
-🚨 *$symbol ($exchange)* 🚨
+$direction *$symbol ($exchange)* $direction
 
 🔹 *Symbol:* [$symbol]($symbol)
-🔹 *Direction:* $direction $directionText
 🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%  
 🔹 *Timeframe:* $time
 🔹 *Binance Link:* [$symbol]($binanceUrl)
@@ -649,7 +686,7 @@ class _MyHomePageState extends State<MyHomePage> {
               padding: const EdgeInsets.all(8.0),
               child: Text(
                 selectedCoins.join(', '),
-                style: TextStyle(fontSize: isHide ? 14 : 18.5, color: Colors.white),
+                style: TextStyle(fontSize: isHide ? 14 : 17, color: Colors.white),
               ),
             ),
 

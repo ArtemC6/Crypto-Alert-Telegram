@@ -1,74 +1,7 @@
-// const cryptoList = [
-//   // Базовые криптовалюты
-//   "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
-//
-//   // Смарт-контракты (L1, L2)
-//   "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT", "AVAXUSDT",
-//   "NEARUSDT", "ATOMUSDT", "FTMUSDT",
-//
-//   // DeFi
-//   "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "CRVUSDT",
-//   "SNXUSDT", "YFIUSDT",
-//
-//   // Мемкоины (высокая волатильность)
-//   "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "1000CATUSDT",
-//   "WIFUSDT", "BONKUSDT", "TURBOUSDT",
-//
-//   // Метавселенные и NFT
-//   "MANAUSDT", "SANDUSDT", "AXSUSDT", "ENJUSDT", "GALAUSDT",
-//
-//   // Layer 2 (Matic, Arbitrum, Optimism)
-//   "MATICUSDT", "ARBUSDT", "OPUSDT",
-//
-//   // Платежные решения
-//   "XRPUSDT", "XLMUSDT", "ALGOUSDT",
-//
-//   // AI и Big Data
-//   "FETUSDT", "OCEANUSDT", "AGIXUSDT",
-//
-//   // Социальные токены и Web3
-//   "TRUMPUSDT", "RLCUSDT", "MASKUSDT", "BANDUSDT",
-//
-//   "SUIUSDT", "LUNAUSDT", "APTUSDT",
-//   "C98USDT", "DYDXUSDT", "ORDIUSDT"
-// ];
-
 const cryptoList = [
-  // Базовые криптовалюты
-  "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
-
-  // Смарт-контракты (L1, L2)
-  "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT", "AVAXUSDT",
-  "NEARUSDT", "ATOMUSDT", "FTMUSDT", "DOTUSDT", "TRXUSDT",
-
-  // DeFi
-  "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "CRVUSDT",
-  "SNXUSDT", "YFIUSDT", "SUSHIUSDT", "LINKUSDT", "RUNEUSDT",
-
-  // Мемкоины (высокая волатильность)
-  "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "1000CATUSDT",
-  "WIFUSDT", "BONKUSDT", "TURBOUSDT", "MEMEUSDT", "BABYDOGEUSDT",
-
-  // Метавселенные и NFT
-  "MANAUSDT", "SANDUSDT", "AXSUSDT", "ENJUSDT", "GALAUSDT",
-  "IMXUSDT", "APEUSDT", "RNDRUSDT", "FLOWUSDT",
-
-  // Layer 2 (Matic, Arbitrum, Optimism)
-  "MATICUSDT", "ARBUSDT", "OPUSDT", "METISUSDT", "IMXUSDT",
-
-  // Платежные решения
-  "XRPUSDT", "XLMUSDT", "ALGOUSDT", "HBARUSDT", "QNTUSDT",
-
-  // AI и Big Data
-  "FETUSDT", "OCEANUSDT", "AGIXUSDT", "RNDRUSDT", "AKTUSDT",
-
-  // Социальные токены и Web3
-  "TRUMPUSDT", "RLCUSDT", "MASKUSDT", "BANDUSDT", "HOOKUSDT",
-
-  // Другие популярные и волатильные монеты
-  "SUIUSDT", "LUNAUSDT", "APTUSDT", "C98USDT", "DYDXUSDT",
-  "ORDIUSDT", "INJUSDT", "SEIUSDT", "TIAUSDT", "MINAUSDT",
-  "KASUSDT", "TAOUSDT", "ZETAUSDT", "JUPUSDT", "WLDUSDT"
+  ...lowVolatilityCrypto,
+  ...mediumVolatilityCrypto,
+  ...highVolatilityCrypto,
 ];
 
 const highVolatilityCrypto = [
@@ -82,19 +15,19 @@ const highVolatilityCrypto = [
   "TAOUSDT", "ZETAUSDT", "JUPUSDT", "WLDUSDT",
 
   // Социальные токены и Web3
-  "TRUMPUSDT", "HOOKUSDT",
+  "TRUMPUSDT", "HOOKUSDT", "LADYSUSDT", "GMRUSDT",
 
   // Метавселенные и NFT (часто волатильные)
-  "GALAUSDT", "IMXUSDT", "APEUSDT", "FLOWUSDT",
+  "GALAUSDT", "IMXUSDT", "APEUSDT", "FLOWUSDT", "SFPUSDT",
 
   // DeFi (некоторые волатильные)
-  "SUSHIUSDT", "RUNEUSDT", "CRVUSDT", "SNXUSDT", "YFIUSDT"
+  "SUSHIUSDT", "RUNEUSDT", "CRVUSDT", "SNXUSDT", "YFIUSDT",
+
+  // Дополнительные высоковолатильные монеты
+  "CHZUSDT", "HOTUSDT", "STMXUSDT", "VETUSDT", "ANKRUSDT"
 ];
 
-const lowVolatilityCrypto = [
-  // Базовые криптовалюты
-  "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
-
+const mediumVolatilityCrypto = [
   // Смарт-контракты (L1, L2)
   "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT", "AVAXUSDT",
   "NEARUSDT", "ATOMUSDT", "FTMUSDT", "DOTUSDT", "TRXUSDT",
@@ -115,20 +48,35 @@ const lowVolatilityCrypto = [
   "FETUSDT", "OCEANUSDT", "AGIXUSDT", "AKTUSDT",
 
   // Социальные токены и Web3 (менее волатильные)
-  "RLCUSDT", "MASKUSDT", "BANDUSDT"
+  "RLCUSDT", "MASKUSDT", "BANDUSDT",
+
+  // Дополнительные средневолатильные монеты
+  "EGLDUSDT", "ONEUSDT", "KAVAUSDT", "ZILUSDT", "IOTAUSDT"
+];
+
+const lowVolatilityCrypto = [
+  // Базовые криптовалюты
+  "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
+
+  // Дополнительные низковолатильные монеты
+  "USDCUSDT", "USDTUSDT", "BUSDUSDT", "DAIUSDT", "TUSDUSDT",
+
+  // Устойчивые проекты
+  "ETCUSDT", "ZECUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT"
 ];
 
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
 const chatId = '1288898832';
 
 const timeFrames = [
+  Duration(seconds: 0),
   Duration(seconds: 1),
   Duration(seconds: 3),
   Duration(seconds: 5),
   Duration(seconds: 15),
   Duration(seconds: 30),
+  Duration(seconds: 45),
   Duration(minutes: 1),
   Duration(minutes: 3),
   Duration(minutes: 5),
-  Duration(minutes: 10),
 ];
