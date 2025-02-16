@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:binanse_notification/Screens/select_token.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -19,16 +20,18 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   WebSocketChannel? _channelSpotBinance, _channelStopFuture, _okxChannel;
 
-  late List<Map<String, dynamic>> coinsList;
+  late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
 
   List<String> selectedCoins = [];
   double priceChangeThreshold = 1.0;
-  bool isHide = true, isByBitActive = false;
+  bool isHide = true, isOKXConnected = false;
 
-  final Map<String, List<Map<String, dynamic>>> _priceHistory = {};
-  final Map<String, Map<Duration, DateTime>> _lastNotificationTimes = {};
-  final Duration _historyDuration = Duration(minutes: 5);
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
+  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesBinance = {};
+
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
+  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesOKX = {};
 
   late final StorageService _storageService;
 
@@ -36,11 +39,38 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _storageService = StorageService();
-    coinsList = [];
+    coinsListBinance = [];
+    coinsListOKX = [];
     coinsListForSelect = [];
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
+  }
+
+  Future<void> _fetchTopGainers() async {
+    try {
+      final response = await http.get(Uri.parse('https://api.binance.com/api/v3/ticker/24hr'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as List;
+
+        final topGainers = data
+            .where((ticker) => ticker['symbol'].endsWith('USDT'))
+            .map((ticker) => {
+                  'symbol': ticker['symbol'],
+                  'priceChangePercent': double.parse(ticker['priceChangePercent'])
+                })
+            .toList();
+
+        topGainers.sort((a, b) => b['priceChangePercent'].compareTo(a['priceChangePercent']));
+
+        coinsListForSelect.addAll(topGainers.take(14).toList());
+        setState(() => selectedCoins.addAll(topGainers.take(14).map((e) => e['symbol'] as String)));
+
+        _saveSelectedCoins();
+      }
+    } catch (e) {
+      print('Error fetching top gainers: $e');
+    }
   }
 
   Future<void> _fetchAvailableCoins() async {
@@ -48,12 +78,10 @@ class _MyHomePageState extends State<MyHomePage> {
       final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          coinsListForSelect = (data['symbols'] as List)
-              .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
-              .map((symbol) => {'symbol': symbol['symbol']})
-              .toList();
-        });
+        setState(() => coinsListForSelect.addAll((data['symbols'] as List)
+            .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
+            .map((symbol) => {'symbol': symbol['symbol']})
+            .toList()));
       }
     } catch (e) {
       print('Error fetching available coins: $e');
@@ -84,22 +112,24 @@ class _MyHomePageState extends State<MyHomePage> {
     _okxChannel!.stream.listen(
       _processMessageOKX,
       onDone: () {
-        print('OKX WebSocket connection closed. Reconnecting...');
-        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+        if (!isOKXConnected) {
+          print('OKX WebSocket connection closed. Reconnecting...');
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+        }
       },
       onError: (error) {
-        print('OKX WebSocket error: $error. Reconnecting...');
-        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+        if (!isOKXConnected) {
+          print('OKX WebSocket error: $error. Reconnecting...');
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+        }
       },
       cancelOnError: true,
     );
   }
 
   void _processMessageOKX(dynamic message) {
-    print('Received message from OKX: $message');
     final data = json.decode(message);
     if (data is! Map<String, dynamic> || data['arg'] == null || data['data'] == null) {
-      print('Invalid message format or not a ticker');
       return;
     }
 
@@ -107,18 +137,16 @@ class _MyHomePageState extends State<MyHomePage> {
     final price = double.parse(data['data'][0]['last']);
     final timestamp = DateTime.now();
 
-    print('Processing OKX data: $symbol, $price, $timestamp');
-
-    _storePrice(symbol, price, timestamp);
-    _checkPriceChange(symbol, price, timestamp);
-    if (isHide) _updateCoinsList(symbol, price);
+    _storePriceOKX(symbol, price, timestamp);
+    _checkPriceChangeOKX(symbol, price, timestamp);
+    if (isHide) _updateCoinsListOKX(symbol, price);
   }
 
   void _loadSelectedCoins() async {
     selectedCoins = await _storageService.loadSelectedCoins();
-    setState(() => selectedCoins = selectedCoins);
+    selectedCoins.addAll(cryptoList);
+    setState(() {});
     _connectWebSocketBinance();
-    // _connectWebSocketOKX();
   }
 
   void _connectWebSocketBinance() {
@@ -161,43 +189,74 @@ class _MyHomePageState extends State<MyHomePage> {
     final price = double.parse(data['c']);
     final timestamp = DateTime.now();
 
-    _storePrice(symbol, price, timestamp);
-    _checkPriceChange(symbol, price, timestamp);
-    if (isHide) _updateCoinsList(symbol, price);
+    _storePriceBinance(symbol, price, timestamp);
+    _checkPriceChangeBinance(symbol, price, timestamp);
+    if (isHide) _updateCoinsListBinance(symbol, price);
   }
 
-  void _storePrice(String symbol, double price, DateTime timestamp) {
-    _priceHistory.putIfAbsent(symbol, () => []);
-    final history = _priceHistory[symbol]!;
+  void _storePriceBinance(String symbol, double price, DateTime timestamp) {
+    _priceHistoryBinance.putIfAbsent(symbol, () => []);
+    final history = _priceHistoryBinance[symbol]!;
 
     history.add({'price': price, 'timestamp': timestamp});
 
-    if (history.length > 300) {
+    if (history.length > 500) {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >= _historyDuration.inMinutes);
+          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 10).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
         final previousPrice = history[history.length - 2]['price'];
         final changePercentage = ((price - previousPrice) / previousPrice) * 100;
-        final coinIndex = coinsList.indexWhere((coin) => coin['symbol'] == symbol);
+        final coinIndex = coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
         if (coinIndex != -1) {
-          setState(() => coinsList[coinIndex]['changePercentage'] = changePercentage);
+          setState(() => coinsListBinance[coinIndex]['changePercentage'] = changePercentage);
         }
       }
     }
   }
 
-  void _checkPriceChange(String symbol, double currentPrice, DateTime timestamp) {
-    for (final timeFrame in timeFrames) {
-      _checkTimeFrame(symbol, currentPrice, timestamp, timeFrame);
+  void _storePriceOKX(String symbol, double price, DateTime timestamp) {
+    _priceHistoryOKX.putIfAbsent(symbol, () => []);
+    final history = _priceHistoryOKX[symbol]!;
+
+    history.add({'price': price, 'timestamp': timestamp});
+
+    if (history.length > 500) {
+      history.removeAt(0);
+    } else {
+      history.removeWhere((entry) =>
+          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 10).inMinutes);
+    }
+    if (isHide) {
+      if (history.length > 1) {
+        final previousPrice = history[history.length - 2]['price'];
+        final changePercentage = ((price - previousPrice) / previousPrice) * 100;
+        final coinIndex = coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
+        if (coinIndex != -1) {
+          setState(() => coinsListOKX[coinIndex]['changePercentage'] = changePercentage);
+        }
+      }
     }
   }
 
-  void _checkTimeFrame(String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) {
-    final history = _priceHistory[symbol];
+  void _checkPriceChangeBinance(String symbol, double currentPrice, DateTime timestamp) {
+    for (final timeFrame in timeFrames) {
+      _checkTimeFrameBinance(symbol, currentPrice, timestamp, timeFrame);
+    }
+  }
+
+  void _checkPriceChangeOKX(String symbol, double currentPrice, DateTime timestamp) {
+    for (final timeFrame in timeFrames) {
+      _checkTimeFrameOKX(symbol, currentPrice, timestamp, timeFrame);
+    }
+  }
+
+  void _checkTimeFrameBinance(
+      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) {
+    final history = _priceHistoryBinance[symbol];
     if (history == null || history.isEmpty) return;
 
     final cutoffTime = timestamp.subtract(timeFrame);
@@ -212,32 +271,78 @@ class _MyHomePageState extends State<MyHomePage> {
     final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
 
     if (changePercent.abs() >= priceChangeThreshold) {
-      final lastNotificationTime = _lastNotificationTimes[symbol]?[timeFrame];
+      final lastNotificationTime = _lastNotificationTimesBinance[symbol]?[timeFrame];
       if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
         history.remove(oldPriceData);
 
         final timeDifferenceMessage =
             _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
         _sendTelegramNotification(
-            symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice);
+            symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'Binance');
 
-        _lastNotificationTimes.putIfAbsent(symbol, () => {});
-        _lastNotificationTimes[symbol]![timeFrame] = timestamp;
+        _lastNotificationTimesBinance.putIfAbsent(symbol, () => {});
+        _lastNotificationTimesBinance[symbol]![timeFrame] = timestamp;
       }
     }
   }
 
-  void _updateCoinsList(String symbol, double price) {
-    final existingCoinIndex = coinsList.indexWhere((coin) => coin['symbol'] == symbol);
+  void _checkTimeFrameOKX(
+      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) {
+    final history = _priceHistoryOKX[symbol];
+    if (history == null || history.isEmpty) return;
+
+    final cutoffTime = timestamp.subtract(timeFrame);
+    final oldPriceData = history.lastWhere(
+      (entry) => entry['timestamp'].isBefore(cutoffTime),
+      orElse: () => {},
+    );
+
+    if (oldPriceData.isEmpty) return;
+
+    final oldPrice = oldPriceData['price'];
+    final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
+
+    if (changePercent.abs() >= priceChangeThreshold) {
+      final lastNotificationTime = _lastNotificationTimesOKX[symbol]?[timeFrame];
+      if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
+        history.remove(oldPriceData);
+
+        final timeDifferenceMessage =
+            _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
+        _sendTelegramNotification(
+            symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'OKX');
+
+        _lastNotificationTimesOKX.putIfAbsent(symbol, () => {});
+        _lastNotificationTimesOKX[symbol]![timeFrame] = timestamp;
+      }
+    }
+  }
+
+  void _updateCoinsListBinance(String symbol, double price) {
+    final existingCoinIndex = coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
 
     if (existingCoinIndex == -1) {
-      setState(() => coinsList.add({
+      setState(() => coinsListBinance.add({
             'symbol': symbol,
             'price': price,
             'changePercentage': 0.0,
           }));
     } else {
-      setState(() => coinsList[existingCoinIndex]['price'] = price);
+      setState(() => coinsListBinance[existingCoinIndex]['price'] = price);
+    }
+  }
+
+  void _updateCoinsListOKX(String symbol, double price) {
+    final existingCoinIndex = coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
+
+    if (existingCoinIndex == -1) {
+      setState(() => coinsListOKX.add({
+            'symbol': symbol,
+            'price': price,
+            'changePercentage': 0.0,
+          }));
+    } else {
+      setState(() => coinsListOKX[existingCoinIndex]['price'] = price);
     }
   }
 
@@ -256,26 +361,26 @@ class _MyHomePageState extends State<MyHomePage> {
     double changeDirection,
     String time,
     double currentPrice,
+    String exchange,
   ) async {
     final String direction = changeDirection > 0 ? '📈' : '📉';
     final String directionText = changeDirection > 0 ? 'up' : 'down';
 
-    // Формируем ссылки на Binance и Bybit
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
     final String message = '''
-🚨 *Price Alert!* 🚨
-  
-🔹 *Symbol:* [$symbol]($binanceUrl)
+🚨 *$symbol ($exchange)* 🚨
+
+🔹 *Symbol:* [$symbol]($symbol)
 🔹 *Direction:* $direction $directionText
-🔹 *Change:* ${changeDirection.toStringAsFixed(1)}%
+🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%  
 🔹 *Timeframe:* $time
+🔹 *Binance Link:* [$symbol]($binanceUrl)
 
-💵 *Current Price:* $currentPrice
-
-
-  ''';
+💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD  
+  '''
+        .trim();
 
     final String encodedMessage = Uri.encodeComponent(message);
 
@@ -283,9 +388,9 @@ class _MyHomePageState extends State<MyHomePage> {
         'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=$encodedMessage&parse_mode=Markdown';
 
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.post(Uri.parse(url));
       if (response.statusCode == 200) {
-        print("Telegram notification sent!");
+        print("Telegram notification sent successfully!");
       } else {
         print("Failed to send notification to Telegram. Status code: ${response.statusCode}");
       }
@@ -321,9 +426,27 @@ class _MyHomePageState extends State<MyHomePage> {
     await _storageService.savePriceChangeThreshold(value);
   }
 
+  void _toggleOKXConnection() {
+    if (isOKXConnected) {
+      _okxChannel?.sink.close();
+      coinsListOKX.clear();
+      setState(() => isOKXConnected = false);
+    } else {
+      _connectWebSocketOKX();
+      setState(() => isOKXConnected = true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final filteredCoins = coinsList.where((coin) => selectedCoins.contains(coin['symbol'])).toList()
+    final filteredCoinsBinance = coinsListBinance
+        .where((coin) => selectedCoins.contains(coin['symbol']))
+        .toList()
+      ..sort((a, b) => b['price'].compareTo(a['price']));
+
+    final filteredCoinsOKX = coinsListOKX
+        .where((coin) => selectedCoins.contains(coin['symbol']))
+        .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
 
     return SafeArea(
@@ -358,15 +481,31 @@ class _MyHomePageState extends State<MyHomePage> {
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   ElevatedButton(
                     onPressed: _openSelectCoinsScreen,
-                    child: Text('Select Coins for Notifications'),
+                    child: Text('Select'),
                   ),
                   SizedBox(width: 10),
                   ElevatedButton(
                     onPressed: _deleteCoins,
-                    child: Text('Delete Coins'),
+                    child: Text('Delete'),
+                  ),
+                  SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () {
+                      _fetchTopGainers();
+                    },
+                    child: Text('Top 10'),
+                  ),
+                  SizedBox(width: 10),
+                  CupertinoSwitch(
+                    value: isOKXConnected,
+                    onChanged: (bool value) {
+                      _toggleOKXConnection();
+                    },
+                    activeTrackColor: Colors.deepPurpleAccent,
                   ),
                 ],
               ),
@@ -389,20 +528,46 @@ class _MyHomePageState extends State<MyHomePage> {
                           isHide = !isHide;
                         });
                       },
-                      child: Text(!isHide ? 'Show' : 'Hide ${filteredCoins.length}'),
+                      child: Text(!isHide
+                          ? 'Show'
+                          : 'Hide ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
                     ),
                   ),
                 ],
               ),
             ),
+            if (isHide && isOKXConnected)
+              Expanded(
+                child: ListView.builder(
+                  itemCount: filteredCoinsOKX.length,
+                  itemBuilder: (context, index) {
+                    final coin = filteredCoinsOKX[index];
+                    return ListTile(
+                      title: Text('(OKX) ${coin['symbol']}'),
+                      subtitle: Text(
+                        'Price: ${coin['price']}',
+                        style: TextStyle(
+                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                        ),
+                      ),
+                      trailing: Text(
+                        'Change: ${coin['changePercentage'].toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             if (isHide)
               Expanded(
                 child: ListView.builder(
-                  itemCount: filteredCoins.length,
+                  itemCount: filteredCoinsBinance.length,
                   itemBuilder: (context, index) {
-                    final coin = filteredCoins[index];
+                    final coin = filteredCoinsBinance[index];
                     return ListTile(
-                      title: Text(coin['symbol']),
+                      title: Text('(Binance) ${coin['symbol']}'),
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(

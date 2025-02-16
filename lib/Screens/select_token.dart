@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class SelectCoinsScreen extends StatefulWidget {
@@ -60,18 +61,21 @@ class _SelectCoinsScreenState extends State<SelectCoinsScreen> {
               itemCount: filteredCoins.length,
               itemBuilder: (context, index) {
                 final coin = filteredCoins[index];
-                return CheckboxListTile(
+                return ListTile(
                   title: Text(coin['symbol']),
-                  value: selectedCoins.contains(coin['symbol']),
-                  onChanged: (bool? value) {
-                    setState(() {
-                      if (value == true) {
-                        selectedCoins.add(coin['symbol']);
-                      } else {
-                        selectedCoins.remove(coin['symbol']);
-                      }
-                    });
-                  },
+                  trailing: CupertinoSwitch(
+                    activeColor: Colors.deepPurpleAccent,
+                    value: selectedCoins.contains(coin['symbol']),
+                    onChanged: (bool value) {
+                      setState(() {
+                        if (value) {
+                          selectedCoins.add(coin['symbol']);
+                        } else {
+                          selectedCoins.remove(coin['symbol']);
+                        }
+                      });
+                    },
+                  ),
                 );
               },
             ),

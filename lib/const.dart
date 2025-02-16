@@ -10,8 +10,9 @@ const cryptoList = [
   "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "CRVUSDT",
   "SNXUSDT", "YFIUSDT",
 
-  // Мемкоины
+  // Мемкоины (высокая волатильность)
   "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "1000CATUSDT",
+  "WIFUSDT", "BONKUSDT", "TURBOUSDT",
 
   // Метавселенные и NFT
   "MANAUSDT", "SANDUSDT", "AXSUSDT", "ENJUSDT", "GALAUSDT",
@@ -26,7 +27,10 @@ const cryptoList = [
   "FETUSDT", "OCEANUSDT", "AGIXUSDT",
 
   // Социальные токены и Web3
-  "TRUMPUSDT", "RLCUSDT", "MASKUSDT", "BANDUSDT"
+  "TRUMPUSDT", "RLCUSDT", "MASKUSDT", "BANDUSDT",
+
+  "SUIUSDT", "LUNAUSDT", "APTUSDT",
+  "C98USDT", "DYDXUSDT", "ORDIUSDT"
 ];
 
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
@@ -41,4 +45,5 @@ const timeFrames = [
   Duration(minutes: 1),
   Duration(minutes: 3),
   Duration(minutes: 5),
+  Duration(minutes: 10),
 ];
