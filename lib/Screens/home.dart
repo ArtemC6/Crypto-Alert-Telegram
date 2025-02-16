@@ -622,18 +622,19 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                   ElevatedButton(
                     onPressed: _openSelectCoinsScreen,
-                    child: Text('Sel'),
+                    child: Icon(Icons.search, size: 20),
                   ),
+                  SizedBox(width: 2),
                   ElevatedButton(
                     onPressed: _deleteCoins,
-                    child: Text('Del'),
+                    child: Icon(Icons.delete, size: 20),
                   ),
+                  SizedBox(width: 2),
                   ElevatedButton(
-                    onPressed: () {
-                      _fetchTopGainers();
-                    },
+                    onPressed: () => _fetchTopGainers(),
                     child: Text('10'),
                   ),
+                  SizedBox(width: 2),
                   CupertinoSwitch(
                     value: isOKXConnected,
                     onChanged: (bool value) {
