@@ -18,7 +18,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel? _channelSpotBinance, _channelStopFuture, _okxChannel;
+  WebSocketChannel? _channelSpotBinance, _channelOrderBookBinance, _okxChannel;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -34,6 +34,7 @@ class _MyHomePageState extends State<MyHomePage> {
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesOKX = {};
 
   late final StorageService _storageService;
+  Map<String, Map<String, dynamic>> _orderBooks = {};
 
   @override
   void initState() {
@@ -45,6 +46,95 @@ class _MyHomePageState extends State<MyHomePage> {
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
+  }
+
+  void _connectWebSocketOrderBookBinance() {
+    if (selectedCoins.isEmpty) {
+      _channelOrderBookBinance?.sink.close();
+      return;
+    }
+
+    _channelOrderBookBinance?.sink.close();
+
+    String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@depth').join('/');
+    _channelOrderBookBinance =
+        WebSocketChannel.connect(Uri.parse('wss://stream.binance.com:9443/ws/$streams'));
+
+    _channelOrderBookBinance!.stream.listen(
+      (message) {
+        _processOrderBookMessageBinance(message);
+      },
+      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketOrderBookBinance),
+      onError: (error) =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketOrderBookBinance),
+      cancelOnError: true,
+    );
+  }
+
+  void _processOrderBookMessageBinance(dynamic message) {
+    final data = json.decode(message);
+    if (data is! Map<String, dynamic> ||
+        !data.containsKey('b') ||
+        !data.containsKey('a') ||
+        !data.containsKey('s')) {
+      return;
+    }
+
+    final symbol = data['s'];
+    final bids = data['b'].cast<List<dynamic>>();
+    final asks = data['a'].cast<List<dynamic>>();
+    final orderBook = {'symbol': symbol, 'bids': bids, 'asks': asks};
+
+    // Assuming you have a method to get the last order book for comparison
+    final lastOrderBook = _orderBooks[symbol];
+
+    // double currentSpread = double.parse(asks[0][0]) - double.parse(bids[0][0]);
+    // if (lastOrderBook != null) {
+    //   double lastSpread = double.parse(lastOrderBook['asks'][0][0]) - double.parse(lastOrderBook['bids'][0][0]);
+    //   double spreadPercentageChange = ((currentSpread - lastSpread) / lastSpread) * 100;
+    //
+    //   if (spreadPercentageChange.abs() > 5) { // 5% change threshold
+    //     _sendNotification('Spread Change Alert', 'Spread for $symbol changed by ${spreadPercentageChange.toStringAsFixed(2)}%');
+    //   }
+    // }
+
+    int currentDepth = bids.length + asks.length;
+    if (lastOrderBook != null) {
+      int lastDepth = lastOrderBook['bids'].length + lastOrderBook['asks'].length;
+      int depthChange = currentDepth - lastDepth;
+
+      if (depthChange.abs() > 10) {
+        // Change in depth by 10 levels
+        _sendNotification(
+            'Order Book Depth Alert', 'Depth for $symbol changed by $depthChange levels');
+      }
+    }
+
+    // // Volume alert logic
+    // if (lastOrderBook != null) {
+    //   double lastBestBidVolume = double.parse(lastOrderBook['bids'][0][1]);
+    //   double currentBestBidVolume = double.parse(bids[0][1]);
+    //   double lastBestAskVolume = double.parse(lastOrderBook['asks'][0][1]);
+    //   double currentBestAskVolume = double.parse(asks[0][1]);
+    //
+    //   double volumeThreshold = 1000;  // Example threshold for volume change
+    //
+    //   if (currentBestBidVolume - lastBestBidVolume > volumeThreshold) {
+    //     _sendNotification('High Bid Volume Alert', 'Significant bid volume increase for $symbol');
+    //   }
+    //   if (currentBestAskVolume - lastBestAskVolume > volumeThreshold) {
+    //     _sendNotification('High Ask Volume Alert', 'Significant ask volume increase for $symbol');
+    //   }
+    //   // You can add more conditions here for volume decrease or other metrics.
+    // }
+
+    setState(() {
+      _orderBooks[symbol] = orderBook;
+    });
+  }
+
+  void _sendNotification(String title, String message) {
+    print('Notification: $title - $message');
   }
 
   Future<void> _fetchTopGainers() async {
@@ -64,6 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
         topGainers.sort((a, b) => b['priceChangePercent'].compareTo(a['priceChangePercent']));
 
         coinsListForSelect.addAll(topGainers.take(14).toList());
+        coinsListForSelect = coinsListForSelect.toSet().toList();
         setState(() => selectedCoins.addAll(topGainers.take(14).map((e) => e['symbol'] as String)));
 
         _saveSelectedCoins();
@@ -145,18 +236,18 @@ class _MyHomePageState extends State<MyHomePage> {
   void _loadSelectedCoins() async {
     selectedCoins = await _storageService.loadSelectedCoins();
     selectedCoins.addAll(cryptoList);
+    selectedCoins = selectedCoins.toSet().toList();
     setState(() {});
     _connectWebSocketBinance();
+    // _connectWebSocketOrderBookBinance();
   }
 
   void _connectWebSocketBinance() {
     if (selectedCoins.isEmpty) {
       _channelSpotBinance?.sink.close();
-      _channelStopFuture?.sink.close();
       return;
     }
     _channelSpotBinance?.sink.close();
-    _channelStopFuture?.sink.close();
 
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
     _channelSpotBinance =
@@ -171,6 +262,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _saveSelectedCoins() async {
+    selectedCoins = selectedCoins.toSet().toList();
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
   }
@@ -270,15 +362,28 @@ class _MyHomePageState extends State<MyHomePage> {
     final oldPrice = oldPriceData['price'];
     final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
 
-    if (changePercent.abs() >= priceChangeThreshold) {
+    double threshold = priceChangeThreshold;
+    if (lowVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.75;
+    }
+
+    if (changePercent.abs() >= threshold) {
       final lastNotificationTime = _lastNotificationTimesBinance[symbol]?[timeFrame];
       if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
         history.remove(oldPriceData);
 
         final timeDifferenceMessage =
             _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
-        _sendTelegramNotification(
-            symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'Binance');
+
+        String volatilityCategory = 'Unknown Volatility';
+        if (highVolatilityCrypto.contains(symbol)) {
+          volatilityCategory = 'High Volatility';
+        } else if (lowVolatilityCrypto.contains(symbol)) {
+          volatilityCategory = 'Low Volatility';
+        }
+
+        _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+            currentPrice, 'Binance ($volatilityCategory)');
 
         _lastNotificationTimesBinance.putIfAbsent(symbol, () => {});
         _lastNotificationTimesBinance[symbol]![timeFrame] = timestamp;
@@ -302,15 +407,28 @@ class _MyHomePageState extends State<MyHomePage> {
     final oldPrice = oldPriceData['price'];
     final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
 
-    if (changePercent.abs() >= priceChangeThreshold) {
+    double threshold = priceChangeThreshold;
+    if (lowVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.75;
+    }
+
+    if (changePercent.abs() >= threshold) {
       final lastNotificationTime = _lastNotificationTimesOKX[symbol]?[timeFrame];
       if (lastNotificationTime == null || timestamp.difference(lastNotificationTime) >= timeFrame) {
         history.remove(oldPriceData);
 
         final timeDifferenceMessage =
             _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
-        _sendTelegramNotification(
-            symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'OKX');
+
+        String volatilityCategory = 'Unknown Volatility';
+        if (highVolatilityCrypto.contains(symbol)) {
+          volatilityCategory = 'High Volatility';
+        } else if (lowVolatilityCrypto.contains(symbol)) {
+          volatilityCategory = 'Low Volatility';
+        }
+
+        _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+            currentPrice, 'Binance ($volatilityCategory)');
 
         _lastNotificationTimesOKX.putIfAbsent(symbol, () => {});
         _lastNotificationTimesOKX[symbol]![timeFrame] = timestamp;
@@ -479,27 +597,43 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(4),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
+                  Center(
+                    child: Row(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: ElevatedButton(
+                            onPressed: () {
+                              setState(() {
+                                isHide = !isHide;
+                              });
+                            },
+                            child: Text(!isHide
+                                ? 'Show ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'
+                                : 'Hide ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   ElevatedButton(
                     onPressed: _openSelectCoinsScreen,
-                    child: Text('Select'),
+                    child: Text('Sel'),
                   ),
-                  SizedBox(width: 10),
                   ElevatedButton(
                     onPressed: _deleteCoins,
-                    child: Text('Delete'),
+                    child: Text('Del'),
                   ),
-                  SizedBox(width: 10),
                   ElevatedButton(
                     onPressed: () {
                       _fetchTopGainers();
                     },
-                    child: Text('Top 10'),
+                    child: Text('10'),
                   ),
-                  SizedBox(width: 10),
                   CupertinoSwitch(
                     value: isOKXConnected,
                     onChanged: (bool value) {
@@ -513,29 +647,60 @@ class _MyHomePageState extends State<MyHomePage> {
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Text(
-                'Selected Coins: ${selectedCoins.join(', ')}',
-                style: TextStyle(fontSize: 14, color: Colors.white),
+                selectedCoins.join(', '),
+                style: TextStyle(fontSize: isHide ? 14 : 18.5, color: Colors.white),
               ),
             ),
-            Center(
-              child: Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          isHide = !isHide;
-                        });
-                      },
-                      child: Text(!isHide
-                          ? 'Show'
-                          : 'Hide ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+
+            // Expanded(
+            //   child: ListView.builder(
+            //     itemCount: _orderBooks.length,
+            //     itemBuilder: (context, index) {
+            //       final symbol = _orderBooks.keys.elementAt(index);
+            //       final orderBook = _orderBooks[symbol]!;
+            //       return Card(
+            //         margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            //         elevation: 6,
+            //         shape: RoundedRectangleBorder(
+            //           borderRadius: BorderRadius.circular(16),
+            //         ),
+            //         color: Colors.grey[900],
+            //         // Darker background
+            //         child: Theme(
+            //           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            //           child: ExpansionTile(
+            //             iconColor: Colors.white,
+            //             collapsedIconColor: Colors.white,
+            //             textColor: Colors.white,
+            //             backgroundColor: Colors.grey[900],
+            //             initiallyExpanded: false,
+            //             title: Row(
+            //               children: [
+            //                 Icon(Icons.list_alt, size: 20, color: Colors.white),
+            //                 SizedBox(width: 8),
+            //                 Expanded(
+            //                   child: Text(
+            //                     'Order Book for ${orderBook['symbol']}',
+            //                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            //                     overflow: TextOverflow.ellipsis,
+            //                   ),
+            //                 ),
+            //               ],
+            //             ),
+            //             children: [
+            //               _buildOrderTable(
+            //                   'Bids', orderBook['bids'] as List<List<dynamic>>, Colors.green),
+            //               VerticalDivider(color: Colors.grey[700], thickness: 1),
+            //               _buildOrderTable(
+            //                   'Asks', orderBook['asks'] as List<List<dynamic>>, Colors.red),
+            //             ],
+            //           ),
+            //         ),
+            //       );
+            //     },
+            //   ),
+            // )
+
             if (isHide && isOKXConnected)
               Expanded(
                 child: ListView.builder(
@@ -589,4 +754,55 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+}
+
+Widget _buildOrderTable(String title, List<List<dynamic>> orders, Color color) {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
+        ),
+        SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: color.withOpacity(0.2)),
+            borderRadius: BorderRadius.circular(12),
+            color: color.withOpacity(0.1),
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            physics: NeverScrollableScrollPhysics(),
+            itemCount: orders.length,
+            itemBuilder: (context, index) {
+              final order = orders[index];
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${order[0]}',
+                        style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                    SizedBox(width: 16),
+                    Text(
+                      '${order[1]}',
+                      style: TextStyle(color: color.withOpacity(0.7), fontSize: 14),
+                      textAlign: TextAlign.right,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
 }
