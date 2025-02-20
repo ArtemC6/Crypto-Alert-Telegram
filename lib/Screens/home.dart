@@ -1,10 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -20,9 +25,10 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   WebSocketChannel? _channelSpotBinance, _channelOrderBookBinance, _okxChannel;
   WebSocketChannel? _channelPumpFun;
+  late AnimationController _controller;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -40,44 +46,59 @@ class _MyHomePageState extends State<MyHomePage> {
   late final StorageService _storageService;
   Map<String, Map<String, dynamic>> _orderBooks = {};
   final Set<String> _shownNotifications = {};
-  late TrackballBehavior trackballBehavior;
 
   List<ChartModel>? itemChart;
 
   bool isRefresh = true;
+  final GlobalKey _chartKey = GlobalKey(); // Ключ для графика
 
   @override
   void initState() {
     super.initState();
-    trackballBehavior = TrackballBehavior(enable: true, activationMode: ActivationMode.singleTap);
+    if (kIsWeb) {
+      _controller = AnimationController(
+        vsync: this,
+        duration: Duration(seconds: 2),
+      )..repeat(reverse: true);
+    }
     _storageService = StorageService();
     coinsListBinance = [];
     coinsListOKX = [];
     coinsListForSelect = [];
-    itemChart = []; // Инициализация
+    itemChart = [];
 
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
   }
 
-  Future<void> _fetchHistoricalData(String symbol, {int limit = 1000}) async {
-    print(symbol);
-    try {
-      final response = await http.get(Uri.parse(
-          'https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1h&limit=$limit'));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as List;
-        setState(() {
-          itemChart = data.map((item) => ChartModel.fromJson(item)).toList();
-        });
-      } else {
-        print('Failed to load historical data. Status code: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error fetching historical data: $e');
-    }
-  }
+  // Future<void> _fetchHistoricalData() async {
+  //   String url = 'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=30';
+  //
+  //   print(url);
+  //
+  //   setState(() {
+  //     isRefresh = true;
+  //   });
+  //
+  //   var response = await http.get(Uri.parse(url), headers: {
+  //     "Content-Type": "application/json",
+  //     "Accept": "application/json",
+  //   });
+  //
+  //   setState(() {
+  //     isRefresh = false;
+  //   });
+  //   if (response.statusCode == 200) {
+  //     Iterable x = json.decode(response.body);
+  //     List<ChartModel> modelList = x.map((e) => ChartModel.fromJson(e)).toList();
+  //     setState(() {
+  //       itemChart = modelList;
+  //     });
+  //   } else {
+  //     print(response.statusCode);
+  //   }
+  // }
 
   void _connectWebSocketOrderBookBinance() {
     if (selectedCoins.isEmpty) {
@@ -91,7 +112,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     _channelOrderBookBinance =
         WebSocketChannel.connect(Uri.parse('wss://stream.binance.com:9443/ws/$streams'));
-    // WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
+// WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
     _channelOrderBookBinance!.stream.listen(
       (message) {
@@ -135,7 +156,7 @@ class _MyHomePageState extends State<MyHomePage> {
     String action = '';
     double volumeInUsdt = 0.0;
 
-    // Проверяем биды
+// Проверяем биды
     for (final bid in bids) {
       if (bid.length > 1) {
         final bidValue = double.tryParse(bid[1]) ?? double.infinity;
@@ -148,7 +169,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     }
 
-    // Проверяем аски
+// Проверяем аски
     for (final ask in asks) {
       if (ask.length > 1) {
         final askValue = double.tryParse(ask[1]) ?? double.infinity;
@@ -165,10 +186,10 @@ class _MyHomePageState extends State<MyHomePage> {
       final orderPrice = double.tryParse(oldestOrder[0]) ?? 0.0;
       final priceDifference = (orderPrice - currentPrice).abs();
       if (orderPrice != currentPrice) {
-        // Рассчитываем процентное изменение
+// Рассчитываем процентное изменение
         double percentageDifference = (priceDifference / currentPrice) * 100;
 
-        // Показываем уведомление только если процентное изменение больше 1%
+// Показываем уведомление только если процентное изменение больше 1%
         if (percentageDifference >= 1 && volumeInUsdt > 80000) {
           final notificationContent =
               "$symbol $action Цена $orderPrice - текущая $currentPrice, разница"
@@ -176,8 +197,8 @@ class _MyHomePageState extends State<MyHomePage> {
           if (!_shownNotifications.contains(notificationContent)) {
             print(notificationContent);
             _shownNotifications.add(notificationContent); // Add to shown notifications
-            // showNotification(symbol, action, orderPrice, priceDifference, currentPrice,
-            //     percentageDifference, volumeInUsdt);
+// showNotification(symbol, action, orderPrice, priceDifference, currentPrice,
+//     percentageDifference, volumeInUsdt);
           }
         }
       }
@@ -298,12 +319,11 @@ class _MyHomePageState extends State<MyHomePage> {
   void _loadSelectedCoins() async {
     selectedCoins = await _storageService.loadSelectedCoins();
     selectedCoins.addAll(cryptoList);
-    setState(() => selectedCoins
-    = selectedCoins.toSet().toList());
+    setState(() => selectedCoins = selectedCoins.toSet().toList());
     _connectWebSocketBinance();
     _connectWebSocketOKX();
 
-    // _connectWebSocketOrderBookBinance();
+// _connectWebSocketOrderBookBinance();
   }
 
   void _connectWebSocketBinance() {
@@ -356,10 +376,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     history.add({'price': price, 'timestamp': timestamp});
 
-
     if (history.length > 1000) {
-      print(history.length);
-
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
@@ -413,8 +430,8 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  void _checkTimeFrameBinance(
-      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) {
+  Future<void> _checkTimeFrameBinance(
+      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) async {
     final history = _priceHistoryBinance[symbol];
     if (history == null || history.isEmpty) return;
 
@@ -443,26 +460,29 @@ class _MyHomePageState extends State<MyHomePage> {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 45)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 150)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
               _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
-          _sendTelegramNotification(
-              symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'Binance');
-
           _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
           _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
           _lastNotificationTimes[symbol] = timestamp;
           history.remove(oldPriceData);
+
+          await _fetchHistoricalData(symbol);
+          Uint8List? chartImage = await _captureChart();
+
+          _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+              currentPrice, 'Binance', chartImage!);
         }
       }
     }
   }
 
-  void _checkTimeFrameOKX(
-      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) {
+  Future<void> _checkTimeFrameOKX(
+      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) async {
     final history = _priceHistoryOKX[symbol];
     if (history == null || history.isEmpty) return;
 
@@ -491,19 +511,22 @@ class _MyHomePageState extends State<MyHomePage> {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 45)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 150)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
               _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
-          _sendTelegramNotification(
-              symbol, currentPrice, changePercent, timeDifferenceMessage, currentPrice, 'OKX');
-
           _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
           _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
           _lastNotificationTimes[symbol] = timestamp;
           history.remove(oldPriceData);
+
+          await _fetchHistoricalData(symbol);
+          Uint8List? chartImage = await _captureChart();
+
+          _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+              currentPrice, 'OKX', chartImage!);
         }
       }
     }
@@ -537,6 +560,26 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  Future<void> _fetchHistoricalData(
+    String symbol,
+  ) async {
+    int limit = kIsWeb ? 100 : 55;
+
+    try {
+      final response = await http.get(Uri.parse(
+          'https://api.binance.com/api/v3/klines?symbol=$symbol&interval=5m&limit=$limit'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as List;
+        setState(() => itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
+        await Future.delayed(const Duration(milliseconds: 50), () {});
+      } else {
+        print('Failed to load historical data. Status code: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching historical data: $e');
+    }
+  }
+
   String _getTimeDifferenceMessage(DateTime currentTime, DateTime lastUpdateTime) {
     final difference = currentTime.difference(lastUpdateTime);
     if (difference.inSeconds < 60) {
@@ -553,33 +596,44 @@ class _MyHomePageState extends State<MyHomePage> {
     String time,
     double currentPrice,
     String exchange,
+    Uint8List chartImage, // Снимок графика
   ) async {
     final String direction = changeDirection > 0 ? '📈' : '📉';
 
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
-    final String message = '''
+    // Message text (used as caption for the photo)
+    final String caption = '''
 $direction *$symbol ($exchange)* $direction
 
 🔹 *Symbol:* [$symbol]($symbol)
-🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%  
+🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
+🔹 *Platform:* ${Platform.operatingSystem.toUpperCase()}
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
-💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD  
+💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
   '''
         .trim();
-
-    final String encodedMessage = Uri.encodeComponent(message);
-
-    final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendMessage?chat_id=$chatId&text=$encodedMessage&parse_mode=Markdown';
+    final String url = 'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
 
     try {
-      final response = await http.post(Uri.parse(url));
+      var request = http.MultipartRequest('POST', Uri.parse(url))
+        ..fields['chat_id'] = chatId
+        ..fields['caption'] = caption
+        ..fields['parse_mode'] = 'Markdown'
+        ..files.add(http.MultipartFile.fromBytes(
+          'photo',
+          chartImage,
+          filename: 'chart_$symbol.png', // Telegram requires a filename
+        ));
+
+      // Send the request
+      final response = await request.send();
+
       if (response.statusCode == 200) {
-        print("Telegram notification sent successfully!");
+        print("Telegram notification with chart sent successfully!");
       } else {
         print("Failed to send notification to Telegram. Status code: ${response.statusCode}");
       }
@@ -626,6 +680,19 @@ $direction *$symbol ($exchange)* $direction
     }
   }
 
+  Future<Uint8List?> _captureChart() async {
+    try {
+      RenderRepaintBoundary boundary =
+          _chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (e) {
+      print("Error capturing chart: $e");
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filteredCoinsBinance = coinsListBinance
@@ -638,36 +705,23 @@ $direction *$symbol ($exchange)* $direction
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
 
+    double myHeight = MediaQuery.of(context).size.height;
+    double myWidth = MediaQuery.of(context).size.width;
+
     return SafeArea(
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Column(
           children: [
-            // SfCartesianChart(
-            //   trackballBehavior: trackballBehavior,
-            //   zoomPanBehavior: ZoomPanBehavior(
-            //       enablePinching: true, zoomMode: ZoomMode.x),
-            //   series: <CandleSeries>[
-            //     CandleSeries<ChartModel, int>(
-            //         enableSolidCandles: true,
-            //         enableTooltip: true,
-            //         bullColor: Colors.green,
-            //         bearColor: Colors.red,
-            //         dataSource: itemChart!,
-            //         xValueMapper: (ChartModel sales, _) =>
-            //         sales.time,
-            //         lowValueMapper: (ChartModel sales, _) =>
-            //         sales.low,
-            //         highValueMapper: (ChartModel sales, _) =>
-            //         sales.high,
-            //         openValueMapper: (ChartModel sales, _) =>
-            //         sales.open,
-            //         closeValueMapper: (ChartModel sales, _) =>
-            //         sales.close,
-            //         animationDuration: 55)
-            //   ],
-            // ),
-
+            if (kIsWeb)
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) => Opacity(
+                  opacity: _controller.value,
+                  child: child,
+                ),
+                child: SizedBox(),
+              ),
             SizedBox(
               height: 4,
             ),
@@ -679,7 +733,7 @@ $direction *$symbol ($exchange)* $direction
                   Expanded(
                     child: Slider(
                       value: priceChangeThreshold,
-                      min: 0.1,
+                      min: 0.3,
                       max: 10.0,
                       divisions: 99,
                       label: '${priceChangeThreshold.toStringAsFixed(1)}%',
@@ -709,8 +763,8 @@ $direction *$symbol ($exchange)* $direction
                               });
                             },
                             child: Text(!isHide
-                                ? 'Show ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'
-                                : 'Hide ${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
+                                ? '${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'
+                                : '${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
                           ),
                         ),
                       ],
@@ -741,91 +795,130 @@ $direction *$symbol ($exchange)* $direction
                 ],
               ),
             ),
-
-            Expanded(
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 12.0,
-                  runSpacing: 12.0,
-                  alignment: WrapAlignment.center,
-                  children: selectedCoins
-                      .map((coin) => InkWell(
-                            onTap: () => FlutterClipboard.copy(coin).then((_) {
-                              _fetchHistoricalData(coin);
-                              return ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Скопировано: $coin'),
-                                  duration: Duration(seconds: 1),
+            if (isHide)
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 12.0,
+                    runSpacing: 12.0,
+                    alignment: WrapAlignment.center,
+                    children: selectedCoins
+                        .map((coin) => InkWell(
+                              onTap: () => FlutterClipboard.copy(coin).then((_) {
+                                _fetchHistoricalData(coin);
+                                return ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Скопировано: $coin'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              }),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.white),
+                                  borderRadius: BorderRadius.circular(4.0),
                                 ),
-                              );
-                            }),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white),
-                                borderRadius: BorderRadius.circular(4.0),
+                                child: Text(
+                                  coin,
+                                  style: TextStyle(
+                                      fontSize: isHide ? 13.5 : 15.5, color: Colors.white),
+                                ),
                               ),
-                              child: Text(
-                                coin,
-                                style:
-                                    TextStyle(fontSize: isHide ? 13.5 : 15.5, color: Colors.white),
-                              ),
-                            ),
-                          ))
-                      .toList(),
+                            ))
+                        .toList(),
+                  ),
                 ),
               ),
-            ),
+            SizedBox(
+                height: myHeight * (isHide ? 0.35 : 0.70),
+                width: myWidth,
+                child: RepaintBoundary(
+                  key: _chartKey,
+                  child: SfCartesianChart(
+                    backgroundColor: Colors.black,
+                    trackballBehavior: TrackballBehavior(
+                      enable: true,
+                      activationMode: ActivationMode.singleTap,
+                      tooltipAlignment: ChartAlignment.near,
+                    ),
+                    zoomPanBehavior: ZoomPanBehavior(
+                      enablePinching: true,
+                      zoomMode: ZoomMode.xy,
+                      selectionRectBorderWidth: 10,
+                      enablePanning: true,
+                      enableDoubleTapZooming: true,
+                      enableMouseWheelZooming: true,
+                      enableSelectionZooming: true,
+                    ),
+                    series: <CandleSeries>[
+                      CandleSeries<ChartModel, int>(
+                        enableSolidCandles: true,
+                        enableTooltip: true,
+                        dataSource: itemChart!,
+                        xValueMapper: (ChartModel sales, _) => sales.time,
+                        lowValueMapper: (ChartModel sales, _) => sales.low,
+                        highValueMapper: (ChartModel sales, _) => sales.high,
+                        openValueMapper: (ChartModel sales, _) => sales.open,
+                        closeValueMapper: (ChartModel sales, _) => sales.close,
+                        animationDuration: 0,
+                      )
+                    ],
+                  ),
+                )),
 
-            // Expanded(
-            //   child: ListView.builder(
-            //     itemCount: _orderBooks.length,
-            //     itemBuilder: (context, index) {
-            //       final symbol = _orderBooks.keys.elementAt(index);
-            //       final orderBook = _orderBooks[symbol]!;
-            //       return Card(
-            //         margin: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            //         elevation: 6,
-            //         shape: RoundedRectangleBorder(
-            //           borderRadius: BorderRadius.circular(16),
-            //         ),
-            //         color: Colors.grey[900],
-            //         // Darker background
-            //         child: Theme(
-            //           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            //           child: ExpansionTile(
-            //             iconColor: Colors.white,
-            //             collapsedIconColor: Colors.white,
-            //             textColor: Colors.white,
-            //             backgroundColor: Colors.grey[900],
-            //             initiallyExpanded: false,
-            //             title: Row(
-            //               children: [
-            //                 Icon(Icons.list_alt, size: 20, color: Colors.white),
-            //                 SizedBox(width: 8),
-            //                 Expanded(
-            //                   child: Text(
-            //                     'Order Book for ${orderBook['symbol']}',
-            //                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            //                     overflow: TextOverflow.ellipsis,
-            //                   ),
+            // if (itemChart != null || itemChart!.isNotEmpty)
+            //   SizedBox(
+            //     height: myHeight * 0.35,
+            //     width: myWidth,
+            //     child: RepaintBoundary(
+            //       key: _chartKey,
+            //       child: BarChart(
+            //         BarChartData(
+            //           backgroundColor: Colors.black,
+            //           alignment: BarChartAlignment.spaceAround,
+            //           maxY: itemChart!.map((e) => e.high).reduce((a, b) => a! > b! ? a : b),
+            //           // Максимальное значение
+            //           minY: itemChart!.map((e) => e.low).reduce((a, b) => a! < b! ? a : b),
+            //           // Минимальное значение
+            //           groupsSpace: 4,
+            //           // Расстояние между свечами
+            //           // barTouchData: BarTouchData(enabled: false),
+            //           // Отключение взаимодействия
+            //           titlesData: FlTitlesData(show: false),
+            //           // Заголовки осей
+            //           gridData: FlGridData(show: false),
+            //           // Сетка
+            //           borderData: FlBorderData(show: false),
+            //           // Границы
+            //           barGroups: itemChart!.asMap().entries.map((entry) {
+            //             final data = entry.value;
+            //             final isBullish =
+            //                 data.close! > data.open!; // Бычья свеча (цена закрытия выше открытия)
+            //             final color = isBullish ? Colors.green : Colors.red; // Цвет свечи
+            //
+            //             return BarChartGroupData(
+            //               x: entry.key,
+            //               barRods: [
+            //                 BarChartRodData(
+            //                   fromY: data.low,
+            //                   toY: data.high!,
+            //                   color: Colors.grey.withOpacity(0.5), // Цвет тени (низ-верх)
+            //                   width: 2, // Ширина тени
+            //                 ),
+            //                 BarChartRodData(
+            //                   fromY: isBullish ? data.open : data.close,
+            //                   toY: isBullish ? data.close! : data.open!,
+            //                   color: color, // Цвет тела свечи
+            //                   width: 6, // Ширина тела свечи
             //                 ),
             //               ],
-            //             ),
-            //             children: [
-            //               _buildOrderTable(
-            //                   'Bids', orderBook['bids'] as List<List<dynamic>>, Colors.green),
-            //               VerticalDivider(color: Colors.grey[700], thickness: 1),
-            //               _buildOrderTable(
-            //                   'Asks', orderBook['asks'] as List<List<dynamic>>, Colors.red),
-            //             ],
-            //           ),
+            //             );
+            //           }).toList(),
             //         ),
-            //       );
-            //     },
+            //       ),
+            //     ),
             //   ),
-            // )
-
             if (isHide && isOKXConnected)
               Expanded(
                 child: ListView.builder(
