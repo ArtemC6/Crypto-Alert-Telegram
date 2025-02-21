@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:binanse_notification/Screens/select_token.dart';
@@ -36,6 +35,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   List<String> selectedCoins = [];
   double priceChangeThreshold = 1.0;
   bool isHide = true, isOKXConnected = true;
+  final isPlatform = kIsWeb ? 'Web' : 'Mobile';
 
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
@@ -71,34 +71,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
   }
-
-  // Future<void> _fetchHistoricalData() async {
-  //   String url = 'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=30';
-  //
-  //   print(url);
-  //
-  //   setState(() {
-  //     isRefresh = true;
-  //   });
-  //
-  //   var response = await http.get(Uri.parse(url), headers: {
-  //     "Content-Type": "application/json",
-  //     "Accept": "application/json",
-  //   });
-  //
-  //   setState(() {
-  //     isRefresh = false;
-  //   });
-  //   if (response.statusCode == 200) {
-  //     Iterable x = json.decode(response.body);
-  //     List<ChartModel> modelList = x.map((e) => ChartModel.fromJson(e)).toList();
-  //     setState(() {
-  //       itemChart = modelList;
-  //     });
-  //   } else {
-  //     print(response.statusCode);
-  //   }
-  // }
 
   void _connectWebSocketOrderBookBinance() {
     if (selectedCoins.isEmpty) {
@@ -448,11 +420,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     double threshold = priceChangeThreshold;
     if (lowVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.65;
+      threshold = priceChangeThreshold * 0.60;
     }
 
     if (mediumVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.80;
+      threshold = priceChangeThreshold * 0.85;
     }
 
     if (changePercent.abs() >= threshold) {
@@ -499,11 +471,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     double threshold = priceChangeThreshold;
     if (lowVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.65;
+      threshold = priceChangeThreshold * 0.60;
     }
 
     if (mediumVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.80;
+      threshold = priceChangeThreshold * 0.85;
     }
 
     if (changePercent.abs() >= threshold) {
@@ -603,14 +575,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
-    // Message text (used as caption for the photo)
     final String caption = '''
 $direction *$symbol ($exchange)* $direction
 
 🔹 *Symbol:* [$symbol]($symbol)
 🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
-🔹 *Platform:* ${Platform.operatingSystem.toUpperCase()}
+🔹 *Platform:* $isPlatform
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
 💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
@@ -831,7 +802,7 @@ $direction *$symbol ($exchange)* $direction
                 ),
               ),
             SizedBox(
-                height: myHeight * (isHide ? 0.35 : 0.70),
+                height: myHeight * (isHide ? 0.35 : 0.60),
                 width: myWidth,
                 child: RepaintBoundary(
                   key: _chartKey,
@@ -841,6 +812,9 @@ $direction *$symbol ($exchange)* $direction
                       enable: true,
                       activationMode: ActivationMode.singleTap,
                       tooltipAlignment: ChartAlignment.near,
+                    ),
+                    primaryXAxis: NumericAxis(
+                      isVisible: false,
                     ),
                     zoomPanBehavior: ZoomPanBehavior(
                       enablePinching: true,
@@ -866,59 +840,6 @@ $direction *$symbol ($exchange)* $direction
                     ],
                   ),
                 )),
-
-            // if (itemChart != null || itemChart!.isNotEmpty)
-            //   SizedBox(
-            //     height: myHeight * 0.35,
-            //     width: myWidth,
-            //     child: RepaintBoundary(
-            //       key: _chartKey,
-            //       child: BarChart(
-            //         BarChartData(
-            //           backgroundColor: Colors.black,
-            //           alignment: BarChartAlignment.spaceAround,
-            //           maxY: itemChart!.map((e) => e.high).reduce((a, b) => a! > b! ? a : b),
-            //           // Максимальное значение
-            //           minY: itemChart!.map((e) => e.low).reduce((a, b) => a! < b! ? a : b),
-            //           // Минимальное значение
-            //           groupsSpace: 4,
-            //           // Расстояние между свечами
-            //           // barTouchData: BarTouchData(enabled: false),
-            //           // Отключение взаимодействия
-            //           titlesData: FlTitlesData(show: false),
-            //           // Заголовки осей
-            //           gridData: FlGridData(show: false),
-            //           // Сетка
-            //           borderData: FlBorderData(show: false),
-            //           // Границы
-            //           barGroups: itemChart!.asMap().entries.map((entry) {
-            //             final data = entry.value;
-            //             final isBullish =
-            //                 data.close! > data.open!; // Бычья свеча (цена закрытия выше открытия)
-            //             final color = isBullish ? Colors.green : Colors.red; // Цвет свечи
-            //
-            //             return BarChartGroupData(
-            //               x: entry.key,
-            //               barRods: [
-            //                 BarChartRodData(
-            //                   fromY: data.low,
-            //                   toY: data.high!,
-            //                   color: Colors.grey.withOpacity(0.5), // Цвет тени (низ-верх)
-            //                   width: 2, // Ширина тени
-            //                 ),
-            //                 BarChartRodData(
-            //                   fromY: isBullish ? data.open : data.close,
-            //                   toY: isBullish ? data.close! : data.open!,
-            //                   color: color, // Цвет тела свечи
-            //                   width: 6, // Ширина тела свечи
-            //                 ),
-            //               ],
-            //             );
-            //           }).toList(),
-            //         ),
-            //       ),
-            //     ),
-            //   ),
             if (isHide && isOKXConnected)
               Expanded(
                 child: ListView.builder(
