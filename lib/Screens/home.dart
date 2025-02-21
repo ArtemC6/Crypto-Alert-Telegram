@@ -24,7 +24,6 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   WebSocketChannel? _channelSpotBinanceOne, _okxChannelOne;
-  late AnimationController _controller;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -47,12 +46,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    if (kIsWeb) {
-      _controller = AnimationController(
-        vsync: this,
-        duration: Duration(seconds: 2),
-      )..repeat(reverse: true);
-    }
     _storageService = StorageService();
     coinsListBinance = [];
     coinsListOKX = [];
@@ -581,15 +574,6 @@ $direction *$symbol ($exchange)* $direction
         backgroundColor: Colors.black,
         body: Column(
           children: [
-            if (kIsWeb)
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, child) => Opacity(
-                  opacity: _controller.value,
-                  child: child,
-                ),
-                child: SizedBox(),
-              ),
             SizedBox(
               height: 4,
             ),
