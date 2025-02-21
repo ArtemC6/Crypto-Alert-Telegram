@@ -23,7 +23,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinance, _okxChannel;
+  WebSocketChannel? _channelSpotBinanceOne, _okxChannelOne;
   late AnimationController _controller;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
@@ -110,28 +110,29 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _saveSelectedCoins();
   }
 
-  void _connectWebSocketOKX() {
+  Future<void> _connectWebSocketOKX() async {
     if (selectedCoins.isEmpty) {
       print('No coins selected for OKX');
-      _okxChannel?.sink.close();
+      await _okxChannelOne?.sink.close();
       return;
     }
 
-    _okxChannel?.sink.close();
+    await _okxChannelOne?.sink.close();
 
     final validCoins = selectedCoins
         .where((coin) => coin.endsWith("USDT"))
         .map((coin) => coin.replaceAll("USDT", "-USDT"))
+        .take(150)
         .toList();
 
-    _okxChannel = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
+    _okxChannelOne = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
 
-    _okxChannel!.sink.add(jsonEncode({
+    _okxChannelOne!.sink.add(jsonEncode({
       "op": "subscribe",
       "args": validCoins.map((symbol) => {"channel": "tickers", "instId": symbol}).toList()
     }));
 
-    _okxChannel!.stream.listen(
+    _okxChannelOne!.stream.listen(
       _processMessageOKX,
       onDone: () {
         if (!isOKXConnected) {
@@ -172,18 +173,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _connectWebSocketOKX();
   }
 
-  void _connectWebSocketBinance() {
+  Future<void> _connectWebSocketBinance() async {
     if (selectedCoins.isEmpty) {
-      _channelSpotBinance?.sink.close();
+      await _channelSpotBinanceOne?.sink.close();
       return;
     }
-    _channelSpotBinance?.sink.close();
+    await _channelSpotBinanceOne?.sink.close();
 
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
-    _channelSpotBinance =
+
+    _channelSpotBinanceOne =
         WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
 
-    _channelSpotBinance!.stream.listen(
+    _channelSpotBinanceOne!.stream.listen(
       _processMessageBinance,
       onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
@@ -428,7 +430,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
         setState(() => itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        await Future.delayed(Duration(milliseconds: kIsWeb ? 50 : 200), () {});
+        await Future.delayed(Duration(milliseconds: 150), () {});
 
         return itemChart;
       } else {
@@ -479,28 +481,45 @@ $direction *$symbol ($exchange)* $direction
     final String url = 'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
 
     try {
-      var request = http.MultipartRequest('POST', Uri.parse(url))
-        ..fields['chat_id'] = chatId
-        ..fields['caption'] = caption
-        ..fields['parse_mode'] = 'Markdown';
+      final uri = Uri.parse(url);
+      http.Response response;
 
       if (chartImage != null) {
+        var request = http.MultipartRequest('POST', uri)
+          ..fields['chat_id'] = chatId ?? '' // Handle potential null chatId
+          ..fields['caption'] = caption ?? '' // Handle potential null caption
+          ..fields['parse_mode'] = 'Markdown';
+
         request.files.add(http.MultipartFile.fromBytes(
           'photo',
           chartImage,
-          filename: 'chart_$symbol.png',
+          filename: 'chart_${symbol ?? 'unknown'}.png',
         ));
-      }
 
-      final response = await request.send();
+        // Send the request and get response
+        final streamedResponse = await request.send();
+        response = await http.Response.fromStream(streamedResponse);
+      } else {
+        response = await http.post(
+          uri,
+          body: {
+            'chat_id': chatId ?? '',
+            'caption': caption ?? '',
+            'parse_mode': 'Markdown',
+          },
+        );
+      }
 
       if (response.statusCode == 200) {
         print("Telegram notification with chart sent successfully!");
       } else {
-        print("Failed to send notification to Telegram. Status code: ${response.statusCode}");
+        print("Failed to send notification to Telegram. "
+            "Status code: ${response.statusCode}. "
+            "Response: ${response.body}");
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print("Error sending notification to Telegram: $e");
+      print("Stack trace: $stackTrace");
     }
   }
 
@@ -533,7 +552,7 @@ $direction *$symbol ($exchange)* $direction
 
   void _toggleOKXConnection() {
     if (isOKXConnected) {
-      _okxChannel?.sink.close();
+      _okxChannelOne?.sink.close();
       coinsListOKX.clear();
       setState(() => isOKXConnected = false);
     } else {
