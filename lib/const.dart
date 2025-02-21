@@ -7,113 +7,129 @@ const cryptoList = [
 const highVolatilityCrypto = [
   // Мемкоины (высокая волатильность)
   "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "1000CATUSDT",
-  "WIFUSDT", "BONKUSDT", "TURBOUSDT", "MEMEUSDT", "BABYDOGEUSDT",
+  "WIFUSDT", "BONKUSDT", "TURBOUSDT", "MEMEUSDT", "BOMEUSDT", // Replaced BABYDOGEUSDT
+  "MEWUSDT", // Replaced FOMOUSDT (Cat in a Dog’s World, listed on Binance)
+  "POPCATUSDT", // Replaced ELONUSDT (Popcat, trending meme coin)
+  "BRETTUSDT", // Replaced KISHUUSDT (new meme coin on Binance)
+  "NOTUSDT", // Replaced SAFEMOONUSDT (Notcoin, high volatility)
+  "PONKEUSDT", // Replaced HUSKYUSDT (trending Solana meme coin)
 
   // Новые и трендовые монеты
   "SUIUSDT", "APTUSDT", "C98USDT", "DYDXUSDT", "ORDIUSDT",
   "INJUSDT", "SEIUSDT", "TIAUSDT", "MINAUSDT", "KASUSDT",
-  "TAOUSDT", "ZETAUSDT", "JUPUSDT", "WLDUSDT", "PORTALUSDT", // Portal — игровой проект
-  "PIXELUSDT", // Pixels — игра на блокчейне
-  "ALTUSDT", // AltLayer — L2 решение
-  "XAIUSDT", // xAI — AI-проект
-  "STRKUSDT", // Starknet — L2 решение
+  "TAOUSDT", "ZETAUSDT", "JUPUSDT", "WLDUSDT", "PORTALUSDT",
+  "PIXELUSDT", "ALTUSDT", "XAIUSDT", "STRKUSDT", "RONINUSDT",
+  "BEAMUSDT", "ACEUSDT", "MAVUSDT", "IDUSDT", "CYBERUSDT",
+  "TRUMPUSDT"
 
-  // Социальные токены и Web3
-  "TRUMPUSDT", "HOOKUSDT", "LADYSUSDT", "GMRUSDT",
+      // Социальные токены и Web3
+      "MAGICUSDT", // Replaced  (Magic, Web3-related)
+  "HOOKUSDT", "GALUSDT", // Replaced LADYSUSDT (Galxe, social/Web3)
+  "RAREUSDT", // Replaced  (SuperRare, NFT/Web3)
+  "API3USDT", "EDUUSDT", // Replaced UFOUSDT (EDU from Open Campus)
+  "SOCUSDT", "CHESSUSDT", "VRAUSDT", "COTIUSDT",
+  "GMRUSDT"
 
-  // Метавселенные и NFT (часто волатильные)
-  "GALAUSDT", "IMXUSDT", "APEUSDT", "FLOWUSDT", "SFPUSDT",
-  "BLURUSDT", // Blur — NFT-платформа
-  "MAVIAUSDT", // Heroes of Mavia — игровой проект
+      // Метавселенные и NFT (часто волатильные)
+      "GALAUSDT",
+  "IMXUSDT",
+  "APEUSDT",
+  "FLOWUSDT",
+  "SFPUSDT",
+  "BLURUSDT", "MAVIAUSDT", "TVKUSDT", "SLPUSDT", "ALICEUSDT",
+  "DGUSDT", "ERNUSDT", "YGGUSDT", "ILVUSDT", "COMBOUSDT",
 
   // DeFi (некоторые волатильные)
   "SUSHIUSDT", "RUNEUSDT", "CRVUSDT", "SNXUSDT", "YFIUSDT",
-  "RAYUSDT", // Raydium — DeFi на Solana
-  "JTOUSDT", // Jito — Solana-проект
+  "RAYUSDT", "JTOUSDT", "CAKEUSDT", "BAKEUSDT", "ALPHAUSDT",
+  "QUICKUSDT", "BIFIUSDT", "SPELLUSDT", "TOMOUSDT", "OMGUSDT",
 
   // Дополнительные высоковолатильные монеты
   "CHZUSDT", "HOTUSDT", "VETUSDT", "ANKRUSDT", "STMXUSDT",
+  "CELRUSDT", "DENTUSDT", "WINUSDT", "TFUELUSDT", "DATAUSDT",
 
-  // Новые добавления с Binance (высокая волатильность)
-  "NOTUSDT", "BRETTUSDT", "TNSRUSDT", "ONDOUSDT", "ZROUSDT",
-  "IOUSDT", // IO — проект AI
-  "ZKFUSDT", // zkFair — L2 решение
-  "MYROUSDT", // Myro — мемкоин на Solana
-  "WENUSDT" // WEN — новый мемкоин
+  // Новые добавления с Binance (высокая волатильность) - УДВОЕНЫ
+  "NOTUSDT", "NOTUSDT", "BRETTUSDT", "BRETTUSDT", "TNSRUSDT", "TNSRUSDT", "ONDOUSDT", "ONDOUSDT",
+  "ZROUSDT", "ZROUSDT", "IOUSDT", "IOUSDT", "ZKFUSDT", "ZKFUSDT", "MYROUSDT", "MYROUSDT",
+  "WENUSDT", "WENUSDT", "BNXUSDT", "BNXUSDT", "HIFIUSDT", "HIFIUSDT", "ARKMUSDT", "ARKMUSDT",
+  "NFPUSDT", "NFPUSDT", "AIUSDT", "AIUSDT", "XVSUSDT", "XVSUSDT",
+
+  // Предыдущие добавления (20 монет)
+  "MOGUSDT", "BOMEUSDT", "MEWUSDT", "REZUSDT", // Replaced SILLYUSDT
+  "DYMUSDT", "SSVUSDT", "FRONTUSDT", "AERGOUSDT", "BONDUSDT",
+  "LEVERUSDT", "PDAUSDT", "VANRYUSDT", "DODOUSDT", "RIFUSDT",
+  "PENDLEUSDT", "LINAUSDT", "SXPUSDT", "PERPUSDT", "SUPERUSDT",
+
+  // Новые добавления (30 монет)
+  "POPCATUSDT", "PUSHUSDT", "GROKUSDT", "SAMOUSDT", "DEGENUSDT",
+  "BOMEUSDT", // Replaced MOODENGUSDT (Book of Meme)
+  "GIGAUSDT", "PEPEUSDT", // Replaced MUMUUSDT
+  "NPCUSDT", "NEIROUSDT", "TURBOUSDT", // Replaced TURBOSUSDT with TURBOUSDT
+  "SHRAPUSDT", "LISTAUSDT", "OMNIUSDT", "BETAUSDT",
+  "TRUUSDT", "FORTHUSDT", "RPLUSDT", "BIGTIMEUSDT", "HFTUSDT",
+  "GMEUSDT", "SUNUSDT", "FIOUSDT", "MTLUSDT", "OGNUSDT",
+  "TROYUSDT", "CLVUSDT", "PONKEUSDT", "STPTUSDT", "DOPUSDT"
 ];
 
 const mediumVolatilityCrypto = [
   // Смарт-контракты (L1, L2)
   "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT", "AVAXUSDT",
   "NEARUSDT", "ATOMUSDT", "FTMUSDT", "DOTUSDT", "TRXUSDT",
-  "KLAYUSDT", // Klaytn — блокчейн-платформа
-  "CELOUSDT", // Celo — блокчейн для платежей
+  "KLAYUSDT", "CELOUSDT", "ICPUSDT", "EGLDUSDT", "ONEUSDT",
+  "KAVAUSDT", "ZILUSDT", "IOTAUSDT", "ZECUSDT", "RVNUSDT",
+  "SCUSDT", "ONTUSDT", "WAXPUSDT", "LSKUSDT", "NULSUSDT",
 
   // DeFi (менее волатильные)
   "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "LINKUSDT",
-  "1INCHUSDT", // 1inch — агрегатор DEX
-  "CVXUSDT", // Convex Finance — DeFi-протокол
+  "1INCHUSDT", "CVXUSDT", "SUSHIUSDT", "CRVUSDT", "SNXUSDT",
+  "YFIUSDT", "BALUSDT", "RENUSDT", "KNCUSDT", "OXTUSDT",
 
   // Метавселенные и NFT (менее волатильные)
   "MANAUSDT", "SANDUSDT", "AXSUSDT", "ENJUSDT", "RNDRUSDT",
-  "HIGHUSDT", // Highstreet — метавселенная
-  "TLMUSDT", // Alien Worlds — NFT-игра
+  "HIGHUSDT", "TLMUSDT", "ALICEUSDT", "DGUSDT", "ERNUSDT",
+  "YGGUSDT", "ILVUSDT", "COMBOUSDT", "TVKUSDT", "SLPUSDT",
 
   // Layer 2 (Matic, Arbitrum, Optimism)
-  "MATICUSDT", "ARBUSDT", "OPUSDT", "METISUSDT",
-  "MNTUSDT", // Mantle — L2 решение
-  "SKLUSDT", // Skale — блокчейн для масштабирования
+  "MATICUSDT", "ARBUSDT", "OPUSDT", "METISUSDT", "MNTUSDT",
+  "SKLUSDT", "BOBAUSDT", "LRCUSDT", "IMXUSDT", "DUSKUSDT",
 
   // Платежные решения
   "XRPUSDT", "XLMUSDT", "ALGOUSDT", "HBARUSDT", "QNTUSDT",
-  "XDCUSDT", // XinFin — платежный блокчейн
-  "IOSTUSDT", // IOST — блокчейн для dApps
+  "XDCUSDT", "IOSTUSDT", "NANOUSDT", "XEMUSDT", "WAVESUSDT",
 
   // AI и Big Data
-  "FETUSDT", "OCEANUSDT", "AGIXUSDT", "AKTUSDT",
-  "NMRUSDT", // Numeraire — AI-проект
-  "CTXCUSDT", // Cortex — AI на блокчейне
+  "FETUSDT", "OCEANUSDT", "AGIXUSDT", "AKTUSDT", "NMRUSDT",
+  "CTXCUSDT", "DTAUSDT", "PHBUSDT", "NKNUSDT", "DATAUSDT",
 
   // Социальные токены и Web3 (менее волатильные)
-  "RLCUSDT", "MASKUSDT", "BANDUSDT",
-  "KEYUSDT", // SelfKey — идентификация в Web3
-  "DENTUSDT", // Dent — мобильные данные на блокчейне
-
-  // Дополнительные средневолатильные монеты
-  "EGLDUSDT", "ONEUSDT", "KAVAUSDT", "ZILUSDT", "IOTAUSDT", "ZECUSDT",
-  "RVNUSDT", // Ravencoin — блокчейн для токенизации
-  "SCUSDT", // Siacoin — децентрализованное хранилище
+  "RLCUSDT", "MASKUSDT", "BANDUSDT", "KEYUSDT", "DENTUSDT",
+  "CHZUSDT", "HOTUSDT", "VRAUSDT", "COTIUSDT", "SOCUSDT",
 
   // Новые добавления с Binance (средняя волатильность)
-  "STXUSDT", // Stacks — блокчейн для Bitcoin
-  "PYTHUSDT", // Pyth Network — оракул для DeFi
-  "GRTUSDT", // The Graph — данные для Web3
-  "LDOUSDT", // Lido DAO — стейкинг ETH
-  "ARUSDT" // Arweave — децентрализованное хранилище данных
+  "STXUSDT", "PYTHUSDT", "GRTUSDT", "LDOUSDT",
+  "ARUSDT", "RADUSDT", "BICOUSDT", "GTCUSDT",
+  "ENSUSDT", "ANTUSDT"
 ];
 
 const lowVolatilityCrypto = [
   // Базовые криптовалюты
   "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
+  "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT", "ZENUSDT",
+  "XVGUSDT", "DOGEUSDT", "ZECUSDT", "RVNUSDT", "SCUSDT",
 
-  // Дополнительные низковолатильные монеты
+  // Стейблкоины и стабильные активы
   "USDCUSDT", "USDTUSDT", "BUSDUSDT", "DAIUSDT", "TUSDUSDT",
-  "FDUSDUSDT", // First Digital USD — стейблкоин от Binance
-  "PAXGUSDT", // PAX Gold — подкрепленный золотом актив
-  "WBTCUSDT", // Wrapped Bitcoin — стабильный актив, привязанный к BTC
-  "USTCUSDT", // TerraClassic USD — восстановленный стейблкоин
-  "XAUTUSDT", // Tether Gold — еще один актив, подкрепленный золотом
+  "FDUSDUSDT", "PAXGUSDT", "WBTCUSDT", "USTCUSDT", "XAUTUSDT",
+  "EURUSDT", "GBPUSDT", "AUDUSDT", "JPYUSDT", "KRWUSDT",
 
   // Устойчивые проекты
-  "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT",
-  "ZENUSDT", // Horizen — приватный блокчейн
-  "XVGUSDT", // Verge — приватные платежи
+  "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT", "ZENUSDT",
+  "XVGUSDT", "DOGEUSDT", "ZECUSDT", "RVNUSDT", "SCUSDT",
 
   // Новые добавления с Binance (низкая волатильность)
-  "TWTUSDT", // Trust Wallet Token — токен кошелька
-  "BNXUSDT", // BinaryX — игровой проект
-  "MDTUSDT", // Measurable Data Token — данные на блокчейне
-  "OGUSDT" // OG Fan Token — фан-токен
+  "TWTUSDT", "MDTUSDT", "OGUSDT", "VITEUSDT", "PERLUSDT",
+  "REEFUSDT", "STMXUSDT", "CVCUSDT", "NMRUSDT", "LITUSDT",
+  "UTKUSDT", "RLCUSDT", "MITHUSDT", "COSUSDT", "DOCKUSDT"
 ];
 
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';

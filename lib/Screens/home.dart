@@ -1,14 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
 
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:clipboard/clipboard.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -16,6 +13,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../const.dart';
 import '../model/chart.dart';
 import '../services/storage.dart';
+import '../utils.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -25,8 +23,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinance, _channelOrderBookBinance, _okxChannel;
-  WebSocketChannel? _channelPumpFun;
+  WebSocketChannel? _channelSpotBinance, _okxChannel;
   late AnimationController _controller;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
@@ -36,21 +33,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   double priceChangeThreshold = 1.0;
   bool isHide = true, isOKXConnected = true;
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
-
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
-
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
-
   late final StorageService _storageService;
-  Map<String, Map<String, dynamic>> _orderBooks = {};
-  final Set<String> _shownNotifications = {};
 
   List<ChartModel>? itemChart;
 
   bool isRefresh = true;
-  final GlobalKey _chartKey = GlobalKey(); // Ключ для графика
+  final _chartKey = GlobalKey();
 
   @override
   void initState() {
@@ -70,126 +62,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
-  }
-
-  void _connectWebSocketOrderBookBinance() {
-    if (selectedCoins.isEmpty) {
-      _channelOrderBookBinance?.sink.close();
-      return;
-    }
-
-    _channelOrderBookBinance?.sink.close();
-
-    String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@depth').join('/');
-
-    _channelOrderBookBinance =
-        WebSocketChannel.connect(Uri.parse('wss://stream.binance.com:9443/ws/$streams'));
-// WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
-
-    _channelOrderBookBinance!.stream.listen(
-      (message) {
-        _processOrderBookMessageBinance(message);
-      },
-      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketOrderBookBinance),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketOrderBookBinance),
-      cancelOnError: true,
-    );
-  }
-
-  void _processOrderBookMessageBinance(dynamic message) {
-    final data = json.decode(message);
-    if (data is! Map<String, dynamic> ||
-        !data.containsKey('b') ||
-        !data.containsKey('a') ||
-        !data.containsKey('s')) {
-      return;
-    }
-
-    final symbol = data['s'];
-    final bids = data['b'].cast<List<dynamic>>();
-    final asks = data['a'].cast<List<dynamic>>();
-
-    final currentPrice = double.tryParse(asks.isNotEmpty ? asks[0][0] : bids[0][0]) ?? 0.0;
-
-    final orderBook = {
-      'symbol': symbol,
-      'bids': bids,
-      'asks': asks,
-      'timestamp': DateTime.now().millisecondsSinceEpoch, // Время обновления
-    };
-
-    setState(() {
-      _orderBooks[symbol] = orderBook;
-    });
-
-    List<dynamic> oldestOrder = [];
-    double lowestValue = double.infinity;
-    String action = '';
-    double volumeInUsdt = 0.0;
-
-// Проверяем биды
-    for (final bid in bids) {
-      if (bid.length > 1) {
-        final bidValue = double.tryParse(bid[1]) ?? double.infinity;
-        if (bidValue < lowestValue) {
-          lowestValue = bidValue;
-          oldestOrder = bid;
-          action = 'BUY'; // Если ордер из бидов, то это покупка
-          volumeInUsdt = (double.tryParse(bid[1]) ?? 0.0) * (double.tryParse(bid[0]) ?? 0.0);
-        }
-      }
-    }
-
-// Проверяем аски
-    for (final ask in asks) {
-      if (ask.length > 1) {
-        final askValue = double.tryParse(ask[1]) ?? double.infinity;
-        if (askValue < lowestValue) {
-          lowestValue = askValue;
-          oldestOrder = ask;
-          action = 'SELL'; // Если ордер из асков, то это продажа
-          volumeInUsdt = (double.tryParse(ask[1]) ?? 0.0) * (double.tryParse(ask[0]) ?? 0.0);
-        }
-      }
-    }
-
-    if (oldestOrder.isNotEmpty) {
-      final orderPrice = double.tryParse(oldestOrder[0]) ?? 0.0;
-      final priceDifference = (orderPrice - currentPrice).abs();
-      if (orderPrice != currentPrice) {
-// Рассчитываем процентное изменение
-        double percentageDifference = (priceDifference / currentPrice) * 100;
-
-// Показываем уведомление только если процентное изменение больше 1%
-        if (percentageDifference >= 1 && volumeInUsdt > 80000) {
-          final notificationContent =
-              "$symbol $action Цена $orderPrice - текущая $currentPrice, разница"
-              " ${priceDifference.toStringAsFixed(2)} (${percentageDifference.toStringAsFixed(2)}%), Объем ${volumeInUsdt.toStringAsFixed(1)} USDT";
-          if (!_shownNotifications.contains(notificationContent)) {
-            print(notificationContent);
-            _shownNotifications.add(notificationContent); // Add to shown notifications
-// showNotification(symbol, action, orderPrice, priceDifference, currentPrice,
-//     percentageDifference, volumeInUsdt);
-          }
-        }
-      }
-    }
-  }
-
-  void showNotification(
-    String symbol,
-    String action,
-    double orderPrice,
-    double priceDifference,
-    double currentPrice,
-    double percentageDifference,
-    double volumeInUsdt,
-  ) {
-    String notification =
-        "$symbol $action Цена $orderPrice - текущая $currentPrice, разница ${priceDifference.toStringAsFixed(2)}"
-        " (${percentageDifference.toStringAsFixed(2)}%), Объем ${volumeInUsdt.toStringAsFixed(1)} USDT";
-    print(notification); // Временное решение для отладки
   }
 
   Future<void> _fetchTopGainers() async {
@@ -224,14 +96,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() => coinsListForSelect.addAll((data['symbols'] as List)
+        coinsListForSelect.addAll((data['symbols'] as List)
             .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
             .map((symbol) => {'symbol': symbol['symbol']})
-            .toList()));
+            .toList());
+
+        setState(() => selectedCoins.addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
       }
     } catch (e) {
       print('Error fetching available coins: $e');
     }
+
+    _saveSelectedCoins();
   }
 
   void _connectWebSocketOKX() {
@@ -294,8 +170,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() => selectedCoins = selectedCoins.toSet().toList());
     _connectWebSocketBinance();
     _connectWebSocketOKX();
-
-// _connectWebSocketOrderBookBinance();
   }
 
   void _connectWebSocketBinance() {
@@ -321,6 +195,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     selectedCoins = selectedCoins.toSet().toList();
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
+    _connectWebSocketOKX();
   }
 
   void _deleteCoins() async {
@@ -432,7 +307,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 150)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 180)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -443,11 +318,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           _lastNotificationTimes[symbol] = timestamp;
           history.remove(oldPriceData);
 
-          await _fetchHistoricalData(symbol);
-          Uint8List? chartImage = await _captureChart();
+          final itemChart = await _fetchHistoricalData(symbol);
+          if (itemChart != null) {
+            Uint8List? chartImage = await captureChart(_chartKey);
 
-          _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-              currentPrice, 'Binance', chartImage!);
+            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+                currentPrice, 'Binance', chartImage!);
+          } else {
+            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+                currentPrice, 'Binance', null);
+          }
         }
       }
     }
@@ -483,7 +363,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 150)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 180)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -494,11 +374,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           _lastNotificationTimes[symbol] = timestamp;
           history.remove(oldPriceData);
 
-          await _fetchHistoricalData(symbol);
-          Uint8List? chartImage = await _captureChart();
+          final itemChart = await _fetchHistoricalData(symbol);
+          if (itemChart != null) {
+            Uint8List? chartImage = await captureChart(_chartKey);
 
-          _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-              currentPrice, 'OKX', chartImage!);
+            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+                currentPrice, 'OKX', chartImage!);
+          } else {
+            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
+                currentPrice, 'OKX', null);
+          }
         }
       }
     }
@@ -532,7 +417,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _fetchHistoricalData(
+  Future<List<ChartModel>?> _fetchHistoricalData(
     String symbol,
   ) async {
     int limit = kIsWeb ? 100 : 55;
@@ -543,13 +428,17 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
         setState(() => itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        await Future.delayed(const Duration(milliseconds: 50), () {});
+        await Future.delayed(Duration(milliseconds: kIsWeb ? 50 : 200), () {});
+
+        return itemChart;
       } else {
         print('Failed to load historical data. Status code: ${response.statusCode}');
+        return null;
       }
     } catch (e) {
       print('Error fetching historical data: $e');
     }
+    return null;
   }
 
   String _getTimeDifferenceMessage(DateTime currentTime, DateTime lastUpdateTime) {
@@ -568,7 +457,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     String time,
     double currentPrice,
     String exchange,
-    Uint8List chartImage, // Снимок графика
+    Uint8List? chartImage,
   ) async {
     final String direction = changeDirection > 0 ? '📈' : '📉';
 
@@ -593,14 +482,16 @@ $direction *$symbol ($exchange)* $direction
       var request = http.MultipartRequest('POST', Uri.parse(url))
         ..fields['chat_id'] = chatId
         ..fields['caption'] = caption
-        ..fields['parse_mode'] = 'Markdown'
-        ..files.add(http.MultipartFile.fromBytes(
+        ..fields['parse_mode'] = 'Markdown';
+
+      if (chartImage != null) {
+        request.files.add(http.MultipartFile.fromBytes(
           'photo',
           chartImage,
-          filename: 'chart_$symbol.png', // Telegram requires a filename
+          filename: 'chart_$symbol.png',
         ));
+      }
 
-      // Send the request
       final response = await request.send();
 
       if (response.statusCode == 200) {
@@ -648,19 +539,6 @@ $direction *$symbol ($exchange)* $direction
     } else {
       _connectWebSocketOKX();
       setState(() => isOKXConnected = true);
-    }
-  }
-
-  Future<Uint8List?> _captureChart() async {
-    try {
-      RenderRepaintBoundary boundary =
-          _chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 2.0);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      return byteData?.buffer.asUint8List();
-    } catch (e) {
-      print("Error capturing chart: $e");
-      return null;
     }
   }
 
@@ -893,55 +771,4 @@ $direction *$symbol ($exchange)* $direction
       ),
     );
   }
-}
-
-Widget _buildOrderTable(String title, List<List<dynamic>> orders, Color color) {
-  return Padding(
-    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
-        ),
-        SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: color.withOpacity(0.2)),
-            borderRadius: BorderRadius.circular(12),
-            color: color.withOpacity(0.1),
-          ),
-          child: ListView.builder(
-            shrinkWrap: true,
-            physics: NeverScrollableScrollPhysics(),
-            itemCount: orders.length,
-            itemBuilder: (context, index) {
-              final order = orders[index];
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4.0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${order[0]}',
-                        style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w600),
-                        textAlign: TextAlign.left,
-                      ),
-                    ),
-                    SizedBox(width: 16),
-                    Text(
-                      '${order[1]}',
-                      style: TextStyle(color: color.withOpacity(0.7), fontSize: 14),
-                      textAlign: TextAlign.right,
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    ),
-  );
 }
