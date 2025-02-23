@@ -115,7 +115,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final validCoins = selectedCoins
         .where((coin) => coin.endsWith("USDT"))
         .map((coin) => coin.replaceAll("USDT", "-USDT"))
-        .take(150)
+        .take(100)
         .toList();
 
     _okxChannelOne = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
@@ -415,7 +415,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   Future<List<ChartModel>?> _fetchHistoricalData(
     String symbol,
   ) async {
-    int limit = kIsWeb ? 100 : 55;
+    int limit = 55;
 
     try {
       final response = await http.get(Uri.parse(
@@ -479,8 +479,8 @@ $direction *$symbol ($exchange)* $direction
 
       if (chartImage != null) {
         var request = http.MultipartRequest('POST', uri)
-          ..fields['chat_id'] = chatId ?? '' // Handle potential null chatId
-          ..fields['caption'] = caption ?? '' // Handle potential null caption
+          ..fields['chat_id'] = chatId ?? ''
+          ..fields['caption'] = caption ?? ''
           ..fields['parse_mode'] = 'Markdown';
 
         request.files.add(http.MultipartFile.fromBytes(
@@ -489,7 +489,6 @@ $direction *$symbol ($exchange)* $direction
           filename: 'chart_${symbol ?? 'unknown'}.png',
         ));
 
-        // Send the request and get response
         final streamedResponse = await request.send();
         response = await http.Response.fromStream(streamedResponse);
       } else {
@@ -684,7 +683,7 @@ $direction *$symbol ($exchange)* $direction
               ),
             SizedBox(
                 height: myHeight * (isHide ? 0.35 : 0.60),
-                width: myWidth,
+                width: kIsWeb ? (myWidth * 0.3 < 200 ? 400 : 400) : myWidth,
                 child: RepaintBoundary(
                   key: _chartKey,
                   child: SfCartesianChart(

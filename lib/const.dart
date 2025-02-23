@@ -115,16 +115,12 @@ const lowVolatilityCrypto = [
   // Базовые криптовалюты
   "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
   "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT", "ZENUSDT",
-  "XVGUSDT", "DOGEUSDT", "ZECUSDT", "RVNUSDT", "SCUSDT",
 
   // Стейблкоины и стабильные активы
   "USDCUSDT", "USDTUSDT", "BUSDUSDT", "DAIUSDT", "TUSDUSDT",
   "FDUSDUSDT", "PAXGUSDT", "WBTCUSDT", "USTCUSDT", "XAUTUSDT",
   "EURUSDT", "GBPUSDT", "AUDUSDT", "JPYUSDT", "KRWUSDT",
 
-  // Устойчивые проекты
-  "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT", "ZENUSDT",
-  "XVGUSDT", "DOGEUSDT", "ZECUSDT", "RVNUSDT", "SCUSDT",
 
   // Новые добавления с Binance (низкая волатильность)
   "TWTUSDT", "MDTUSDT", "OGUSDT", "VITEUSDT", "PERLUSDT",
