@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:binanse_notification/Screens/select_token.dart';
-import 'package:clipboard/clipboard.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -23,7 +22,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceOne, _okxChannelOne;
+  WebSocketChannel? _channelSpotBinanceFeatured, _channelSpotBinanceSpot, _okxChannelOne;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -37,8 +36,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final Map<String, DateTime> _lastNotificationTimes = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
   late final StorageService _storageService;
-
   List<ChartModel>? itemChart;
+  DateTime? _lastMessageTimeBinance;
+  DateTime? _lastMessageTimeOKX;
+  bool _isMonitoringBinance = false;
+  bool _isMonitoringOKX = false;
 
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -55,11 +57,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
+    _loadSelectedCoins();
   }
 
   Future<void> _fetchTopGainers() async {
     try {
-      final response = await http.get(Uri.parse('https://api.binance.com/api/v3/ticker/24hr'));
+      final response = await http.get(Uri.parse('https://fapi.binance.com/fapi/v1/ticker/24hr'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
 
@@ -86,11 +89,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _fetchAvailableCoins() async {
     try {
-      final response = await http.get(Uri.parse('https://api.binance.com/api/v3/exchangeInfo'));
+      final response = await http.get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+
         coinsListForSelect.addAll((data['symbols'] as List)
-            .where((symbol) => symbol['status'] == 'TRADING' && symbol['symbol'].endsWith('USDT'))
+            .where((symbol) =>
+                symbol['status'] == 'TRADING' &&
+                symbol['symbol'].endsWith('USDT') &&
+                symbol['contractType'] == 'PERPETUAL')
             .map((symbol) => {'symbol': symbol['symbol']})
             .toList());
 
@@ -99,8 +106,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     } catch (e) {
       print('Error fetching available coins: $e');
     }
-
-    _saveSelectedCoins();
   }
 
   Future<void> _connectWebSocketOKX() async {
@@ -115,7 +120,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final validCoins = selectedCoins
         .where((coin) => coin.endsWith("USDT"))
         .map((coin) => coin.replaceAll("USDT", "-USDT"))
-        .take(100)
+        .take(200)
         .toList();
 
     _okxChannelOne = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
@@ -141,6 +146,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       },
       cancelOnError: true,
     );
+
+    _lastMessageTimeOKX = DateTime.now();
+
+    if (!_isMonitoringOKX) {
+      _monitorOKXConnection();
+    }
   }
 
   void _processMessageOKX(dynamic message) {
@@ -152,6 +163,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
     final price = double.parse(data['data'][0]['last']);
     final timestamp = DateTime.now();
+
+    _lastMessageTimeOKX = timestamp;
 
     _storePriceOKX(symbol, price, timestamp);
     _checkPriceChangeOKX(symbol, price, timestamp);
@@ -168,22 +181,68 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _connectWebSocketBinance() async {
     if (selectedCoins.isEmpty) {
-      await _channelSpotBinanceOne?.sink.close();
+      await _channelSpotBinanceFeatured?.sink.close();
+      await _channelSpotBinanceSpot?.sink.close();
       return;
     }
-    await _channelSpotBinanceOne?.sink.close();
+    await _channelSpotBinanceFeatured?.sink.close();
+    await _channelSpotBinanceSpot?.sink.close();
 
     String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
 
-    _channelSpotBinanceOne =
-        WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
+    _channelSpotBinanceFeatured =
+        WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
-    _channelSpotBinanceOne!.stream.listen(
+    // _channelSpotBinanceSpot =
+    //     WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
+
+    // _channelSpotBinanceSpot!.stream.listen(
+    //   _processMessageBinance,
+    //   onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   cancelOnError: true,
+    // );
+
+    _channelSpotBinanceFeatured!.stream.listen(
       _processMessageBinance,
       onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       cancelOnError: true,
     );
+
+    _lastMessageTimeBinance = DateTime.now();
+
+    if (!_isMonitoringBinance) {
+      _monitorBinanceConnection();
+    }
+  }
+
+  Future<void> _monitorBinanceConnection() async {
+    _isMonitoringBinance = true;
+    while (_isMonitoringBinance) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeBinance != null &&
+          DateTime.now().difference(_lastMessageTimeBinance!).inSeconds >= 30) {
+        print('No data received from Binance for 30 seconds. Reconnecting...');
+        await _connectWebSocketBinance();
+        break;
+      }
+    }
+    _isMonitoringBinance = false;
+  }
+
+  Future<void> _monitorOKXConnection() async {
+    _isMonitoringOKX = true;
+    while (_isMonitoringOKX) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeOKX != null &&
+          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
+        print('No data received from Binance for 30 seconds. Reconnecting...');
+        await _connectWebSocketOKX();
+        break;
+      }
+    }
+    _isMonitoringOKX = false;
   }
 
   void _saveSelectedCoins() async {
@@ -207,6 +266,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final price = double.parse(data['c']);
     final timestamp = DateTime.now();
 
+    _lastMessageTimeBinance = timestamp;
     _storePriceBinance(symbol, price, timestamp);
     _checkPriceChangeBinance(symbol, price, timestamp);
     if (isHide) _updateCoinsListBinance(symbol, price);
@@ -302,7 +362,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 180)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 200)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -358,7 +418,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 180)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 200)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -533,9 +593,7 @@ $direction *$symbol ($exchange)* $direction
 
   void _loadPriceChangeThreshold() async {
     priceChangeThreshold = await _storageService.loadPriceChangeThreshold();
-    setState(() {
-      priceChangeThreshold = priceChangeThreshold;
-    });
+    setState(() => priceChangeThreshold = priceChangeThreshold);
   }
 
   void _savePriceChangeThreshold(double value) async {
@@ -646,41 +704,41 @@ $direction *$symbol ($exchange)* $direction
                 ],
               ),
             ),
-            if (isHide)
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 12.0,
-                    runSpacing: 12.0,
-                    alignment: WrapAlignment.center,
-                    children: selectedCoins
-                        .map((coin) => InkWell(
-                              onTap: () => FlutterClipboard.copy(coin).then((_) {
-                                _fetchHistoricalData(coin);
-                                return ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Скопировано: $coin'),
-                                    duration: Duration(seconds: 1),
-                                  ),
-                                );
-                              }),
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.white),
-                                  borderRadius: BorderRadius.circular(4.0),
-                                ),
-                                child: Text(
-                                  coin,
-                                  style: TextStyle(
-                                      fontSize: isHide ? 13.5 : 15.5, color: Colors.white),
-                                ),
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ),
-              ),
+            // if (isHide)
+            //   Expanded(
+            //     child: SingleChildScrollView(
+            //       child: Wrap(
+            //         spacing: 12.0,
+            //         runSpacing: 12.0,
+            //         alignment: WrapAlignment.center,
+            //         children: selectedCoins
+            //             .map((coin) => InkWell(
+            //                   onTap: () => FlutterClipboard.copy(coin).then((_) {
+            //                     _fetchHistoricalData(coin);
+            //                     return ScaffoldMessenger.of(context).showSnackBar(
+            //                       SnackBar(
+            //                         content: Text('Скопировано: $coin'),
+            //                         duration: Duration(seconds: 1),
+            //                       ),
+            //                     );
+            //                   }),
+            //                   child: Container(
+            //                     padding: const EdgeInsets.all(4),
+            //                     decoration: BoxDecoration(
+            //                       border: Border.all(color: Colors.white),
+            //                       borderRadius: BorderRadius.circular(4.0),
+            //                     ),
+            //                     child: Text(
+            //                       coin,
+            //                       style: TextStyle(
+            //                           fontSize: isHide ? 13.5 : 15.5, color: Colors.white),
+            //                     ),
+            //                   ),
+            //                 ))
+            //             .toList(),
+            //       ),
+            //     ),
+            //   ),
             SizedBox(
                 height: myHeight * (isHide ? 0.35 : 0.60),
                 width: kIsWeb ? (myWidth * 0.3 < 200 ? 400 : 400) : myWidth,

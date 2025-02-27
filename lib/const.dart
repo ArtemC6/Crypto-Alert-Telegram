@@ -5,129 +5,249 @@ const cryptoList = [
 ];
 
 const highVolatilityCrypto = [
-  // Мемкоины (высокая волатильность)
-  "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "1000CATUSDT",
-  "WIFUSDT", "BONKUSDT", "TURBOUSDT", "MEMEUSDT", "BOMEUSDT", // Replaced BABYDOGEUSDT
-  "MEWUSDT", // Replaced FOMOUSDT (Cat in a Dog’s World, listed on Binance)
-  "POPCATUSDT", // Replaced ELONUSDT (Popcat, trending meme coin)
-  "BRETTUSDT", // Replaced KISHUUSDT (new meme coin on Binance)
-  "NOTUSDT", // Replaced SAFEMOONUSDT (Notcoin, high volatility)
-  "PONKEUSDT", // Replaced HUSKYUSDT (trending Solana meme coin)
-
-  // Новые и трендовые монеты
-  "SUIUSDT", "APTUSDT", "C98USDT", "DYDXUSDT", "ORDIUSDT",
-  "INJUSDT", "SEIUSDT", "TIAUSDT", "MINAUSDT", "KASUSDT",
-  "TAOUSDT", "ZETAUSDT", "JUPUSDT", "WLDUSDT", "PORTALUSDT",
-  "PIXELUSDT", "ALTUSDT", "XAIUSDT", "STRKUSDT", "RONINUSDT",
-  "BEAMUSDT", "ACEUSDT", "MAVUSDT", "IDUSDT", "CYBERUSDT",
-  "TRUMPUSDT"
-
-      // Социальные токены и Web3
-      "MAGICUSDT", // Replaced  (Magic, Web3-related)
-  "HOOKUSDT", "GALUSDT", // Replaced LADYSUSDT (Galxe, social/Web3)
-  "RAREUSDT", // Replaced  (SuperRare, NFT/Web3)
-  "API3USDT", "EDUUSDT", // Replaced UFOUSDT (EDU from Open Campus)
-  "SOCUSDT", "CHESSUSDT", "VRAUSDT", "COTIUSDT",
-  "GMRUSDT"
-
-      // Метавселенные и NFT (часто волатильные)
-      "GALAUSDT",
-  "IMXUSDT",
-  "APEUSDT",
-  "FLOWUSDT",
-  "SFPUSDT",
-  "BLURUSDT", "MAVIAUSDT", "TVKUSDT", "SLPUSDT", "ALICEUSDT",
-  "DGUSDT", "ERNUSDT", "YGGUSDT", "ILVUSDT", "COMBOUSDT",
-
-  // DeFi (некоторые волатильные)
-  "SUSHIUSDT", "RUNEUSDT", "CRVUSDT", "SNXUSDT", "YFIUSDT",
-  "RAYUSDT", "JTOUSDT", "CAKEUSDT", "BAKEUSDT", "ALPHAUSDT",
-  "QUICKUSDT", "BIFIUSDT", "SPELLUSDT", "TOMOUSDT", "OMGUSDT",
-
-  // Дополнительные высоковолатильные монеты
-  "CHZUSDT", "HOTUSDT", "VETUSDT", "ANKRUSDT", "STMXUSDT",
-  "CELRUSDT", "DENTUSDT", "WINUSDT", "TFUELUSDT", "DATAUSDT",
-
-  // Новые добавления с Binance (высокая волатильность) - УДВОЕНЫ
-  "NOTUSDT", "NOTUSDT", "BRETTUSDT", "BRETTUSDT", "TNSRUSDT", "TNSRUSDT", "ONDOUSDT", "ONDOUSDT",
-  "ZROUSDT", "ZROUSDT", "IOUSDT", "IOUSDT", "ZKFUSDT", "ZKFUSDT", "MYROUSDT", "MYROUSDT",
-  "WENUSDT", "WENUSDT", "BNXUSDT", "BNXUSDT", "HIFIUSDT", "HIFIUSDT", "ARKMUSDT", "ARKMUSDT",
-  "NFPUSDT", "NFPUSDT", "AIUSDT", "AIUSDT", "XVSUSDT", "XVSUSDT",
-
-  // Предыдущие добавления (20 монет)
-  "MOGUSDT", "BOMEUSDT", "MEWUSDT", "REZUSDT", // Replaced SILLYUSDT
-  "DYMUSDT", "SSVUSDT", "FRONTUSDT", "AERGOUSDT", "BONDUSDT",
-  "LEVERUSDT", "PDAUSDT", "VANRYUSDT", "DODOUSDT", "RIFUSDT",
-  "PENDLEUSDT", "LINAUSDT", "SXPUSDT", "PERPUSDT", "SUPERUSDT",
-
-  // Новые добавления (30 монет)
-  "POPCATUSDT", "PUSHUSDT", "GROKUSDT", "SAMOUSDT", "DEGENUSDT",
-  "BOMEUSDT", // Replaced MOODENGUSDT (Book of Meme)
-  "GIGAUSDT", "PEPEUSDT", // Replaced MUMUUSDT
-  "NPCUSDT", "NEIROUSDT", "TURBOUSDT", // Replaced TURBOSUSDT with TURBOUSDT
-  "SHRAPUSDT", "LISTAUSDT", "OMNIUSDT", "BETAUSDT",
-  "TRUUSDT", "FORTHUSDT", "RPLUSDT", "BIGTIMEUSDT", "HFTUSDT",
-  "GMEUSDT", "SUNUSDT", "FIOUSDT", "MTLUSDT", "OGNUSDT",
-  "TROYUSDT", "CLVUSDT", "PONKEUSDT", "STPTUSDT", "DOPUSDT"
+  "DOGEUSDT", // Dogecoin
+  "SHIBUSDT", // Shiba Inu
+  "PEPEUSDT", // Pepe
+  "FLOKIUSDT", // Floki Inu
+  "1000CATUSDT", // Catcoin
+  "WIFUSDT", // Dogwifhat
+  "BONKUSDT", // Bonk
+  "TURBOUSDT", // Turbo
+  "MEMEUSDT", // Memecoin
+  "BOMEUSDT", // Book of Meme
+  "MEWUSDT", // Cat in a Dog’s World
+  "POPCATUSDT", // Popcat
+  "BRETTUSDT", // Brett
+  "NOTUSDT", // Notcoin
+  "PONKEUSDT", // Ponke
+  "SUIUSDT", // Sui
+  "APTUSDT", // Aptos
+  "C98USDT", // Coin98
+  "DYDXUSDT", // dYdX
+  "ORDIUSDT", // Ordinals
+  "INJUSDT", // Injective
+  "SEIUSDT", // Sei
+  "TIAUSDT", // Celestia
+  "MINAUSDT", // Mina
+  "KASUSDT", // Kaspa
+  "TAOUSDT", // Tao
+  "ZETAUSDT", // ZetaChain
+  "JUPUSDT", // Jupiter
+  "WLDUSDT", // Worldcoin
+  "PORTALUSDT", // Portal
+  "PIXELUSDT", // Pixels
+  "ALTUSDT", // AltLayer
+  "XAIUSDT", // Xai
+  "STRKUSDT", // Starknet
+  "RONINUSDT", // Ronin
+  "BEAMUSDT", // Beam
+  "ACEUSDT", // Fusionist
+  "MAVUSDT", // Maverick Protocol
+  "IDUSDT", // Space ID
+  "CYBERUSDT", // CyberConnect
+  "TRUMPUSDT", // TrumpCoin
+  "MAGICUSDT", // Magic
+  "HOOKUSDT", // Hooked Protocol
+  "GALUSDT", // Galxe
+  "RAREUSDT", // SuperRare
+  "API3USDT", // API3
+  "EDUUSDT", // Open Campus
+  "SOCUSDT", // All Sports
+  "CHESSUSDT", // Tranchess
+  "VRAUSDT", // Verasity
+  "COTIUSDT", // COTI
+  "GMRUSDT", // GamerCoin
+  "GALAUSDT", // Gala
+  "IMXUSDT", // Immutable X
+  "APEUSDT", // ApeCoin
+  "FLOWUSDT", // Flow
+  "SFPUSDT", // SafePal
+  "BLURUSDT", // Blur
+  "MAVIAUSDT", // Heroes of Mavia
+  "TVKUSDT", // Terra Virtua Kolect
+  "SLPUSDT", // Smooth Love Potion
+  "ALICEUSDT", // MyNeighborAlice
+  "DGUSDT", // DeGate
+  "ERNUSDT", // Ethernity Chain
+  "YGGUSDT", // Yield Guild Games
+  "ILVUSDT", // Illuvium
+  "COMBOUSDT", // Combo
+  "SUSHIUSDT", // SushiSwap
+  "RUNEUSDT", // THORChain
+  "CRVUSDT", // Curve DAO Token
+  "SNXUSDT", // Synthetix
+  "YFIUSDT", // yearn.finance
+  "RAYUSDT", // Raydium
+  "JTOUSDT", // Jito
+  "CAKEUSDT", // PancakeSwap
+  "BAKEUSDT", // BakeryToken
+  "ALPHAUSDT", // Alpha Finance Lab
+  "QUICKUSDT", // QuickSwap
+  "BIFIUSDT", // Beefy.Finance
+  "SPELLUSDT", // Spell Token
+  "TOMOUSDT", // TomoChain
+  "OMGUSDT", // OMG Network
+  "CHZUSDT", // Chiliz
+  "HOTUSDT", // Holo
+  "VETUSDT", // VeChain
+  "ANKRUSDT", // Ankr
+  "STMXUSDT", // StormX
+  "CELRUSDT", // Celer Network
+  "DENTUSDT", // Dent
+  "WINUSDT", // WINkLink
+  "TFUELUSDT", // Theta Fuel
+  "DATAUSDT", // Streamr DATAcoin
+  "TNSRUSDT", // Tensor
+  "ONDOUSDT", // ONDO
+  "ZROUSDT", // LayerZero
+  "IOUSDT", // IO.NET
+  "ZKFUSDT", // zkFair
+  "MYROUSDT", // Myro
+  "WENUSDT", // Wen
+  "BNXUSDT", // BinaryX
+  "HIFIUSDT", // Hifi Finance
+  "ARKMUSDT", // Arkham
+  "NFPUSDT", // NFPrompt
+  "AIUSDT", // Sleepless AI
+  "XVSUSDT", // Venus
+  "MOGUSDT", // Mog Coin
+  "REZUSDT", // Renzo
+  "DYMUSDT", // Dymension
+  "SSVUSDT", // SSV Network
+  "FRONTUSDT", // Frontier
+  "AERGOUSDT", // Aergo
+  "BONDUSDT", // BarnBridge
+  "LEVERUSDT", // LeverFi
+  "PDAUSDT", // PlayDapp
+  "VANRYUSDT", // Vanar Chain
+  "DODOUSDT", // DODO
+  "RIFUSDT", // RSK Infrastructure Framework
+  "PENDLEUSDT", // Pendle
+  "LINAUSDT", // Linear
+  "SXPUSDT", // Solar
+  "PERPUSDT", // Perpetual Protocol
+  "SUPERUSDT", // SuperVerse
+  "PUSHUSDT", // Push Protocol
+  "GROKUSDT", // Grok
+  "SAMOUSDT", // Samoyedcoin
+  "DEGENUSDT", // Degen
+  "GIGAUSDT", // GigaChad
+  "NPCUSDT", // NPCoin
+  "NEIROUSDT", // Neiro
+  "SHRAPUSDT", // Shrapnel
+  "LISTAUSDT", // Lista DAO
+  "OMNIUSDT", // Omni Network
+  "BETAUSDT", // Beta Finance
+  "TRUUSDT", // TrueFi
+  "FORTHUSDT", // Ampleforth Governance Token
+  "RPLUSDT", // Rocket Pool
+  "BIGTIMEUSDT", // Big Time
+  "HFTUSDT", // Hashflow
+  "GMEUSDT", // GameStop
+  "SUNUSDT", // Sun Token
+  "FIOUSDT", // FIO Protocol
+  "MTLUSDT", // Metal
+  "OGNUSDT", // Origin Protocol
+  "TROYUSDT", // Troy
+  "CLVUSDT", // Clover Finance
+  "STPTUSDT", // Standard Tokenization Protocol
+  "DOPUSDT" // Drops Ownership Power
 ];
-
 const mediumVolatilityCrypto = [
-  // Смарт-контракты (L1, L2)
-  "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT", "AVAXUSDT",
-  "NEARUSDT", "ATOMUSDT", "FTMUSDT", "DOTUSDT", "TRXUSDT",
-  "KLAYUSDT", "CELOUSDT", "ICPUSDT", "EGLDUSDT", "ONEUSDT",
-  "KAVAUSDT", "ZILUSDT", "IOTAUSDT", "ZECUSDT", "RVNUSDT",
-  "SCUSDT", "ONTUSDT", "WAXPUSDT", "LSKUSDT", "NULSUSDT",
-
-  // DeFi (менее волатильные)
-  "UNIUSDT", "AAVEUSDT", "MKRUSDT", "COMPUSDT", "LINKUSDT",
-  "1INCHUSDT", "CVXUSDT", "SUSHIUSDT", "CRVUSDT", "SNXUSDT",
-  "YFIUSDT", "BALUSDT", "RENUSDT", "KNCUSDT", "OXTUSDT",
-
-  // Метавселенные и NFT (менее волатильные)
-  "MANAUSDT", "SANDUSDT", "AXSUSDT", "ENJUSDT", "RNDRUSDT",
-  "HIGHUSDT", "TLMUSDT", "ALICEUSDT", "DGUSDT", "ERNUSDT",
-  "YGGUSDT", "ILVUSDT", "COMBOUSDT", "TVKUSDT", "SLPUSDT",
-
-  // Layer 2 (Matic, Arbitrum, Optimism)
-  "MATICUSDT", "ARBUSDT", "OPUSDT", "METISUSDT", "MNTUSDT",
-  "SKLUSDT", "BOBAUSDT", "LRCUSDT", "IMXUSDT", "DUSKUSDT",
-
-  // Платежные решения
-  "XRPUSDT", "XLMUSDT", "ALGOUSDT", "HBARUSDT", "QNTUSDT",
-  "XDCUSDT", "IOSTUSDT", "NANOUSDT", "XEMUSDT", "WAVESUSDT",
-
-  // AI и Big Data
-  "FETUSDT", "OCEANUSDT", "AGIXUSDT", "AKTUSDT", "NMRUSDT",
-  "CTXCUSDT", "DTAUSDT", "PHBUSDT", "NKNUSDT", "DATAUSDT",
-
-  // Социальные токены и Web3 (менее волатильные)
-  "RLCUSDT", "MASKUSDT", "BANDUSDT", "KEYUSDT", "DENTUSDT",
-  "CHZUSDT", "HOTUSDT", "VRAUSDT", "COTIUSDT", "SOCUSDT",
-
-  // Новые добавления с Binance (средняя волатильность)
-  "STXUSDT", "PYTHUSDT", "GRTUSDT", "LDOUSDT",
-  "ARUSDT", "RADUSDT", "BICOUSDT", "GTCUSDT",
-  "ENSUSDT", "ANTUSDT"
+  "ETHUSDT", // Ethereum
+  "BNBUSDT", // Binance Coin
+  "ADAUSDT", // Cardano
+  "SOLUSDT", // Solana
+  "AVAXUSDT", // Avalanche
+  "NEARUSDT", // NEAR Protocol
+  "ATOMUSDT", // Cosmos
+  "FTMUSDT", // Fantom
+  "DOTUSDT", // Polkadot
+  "TRXUSDT", // TRON
+  "KLAYUSDT", // Klaytn
+  "CELOUSDT", // Celo
+  "ICPUSDT", // Internet Computer
+  "EGLDUSDT", // MultiversX
+  "ONEUSDT", // Harmony
+  "KAVAUSDT", // Kava
+  "ZILUSDT", // Zilliqa
+  "IOTAUSDT", // IOTA
+  "ZECUSDT", // Zcash
+  "RVNUSDT", // Ravencoin
+  "SCUSDT", // Siacoin
+  "ONTUSDT", // Ontology
+  "WAXPUSDT", // WAX
+  "LSKUSDT", // Lisk
+  "NULSUSDT", // Nuls
+  "UNIUSDT", // Uniswap
+  "AAVEUSDT", // Aave
+  "MKRUSDT", // Maker
+  "COMPUSDT", // Compound
+  "LINKUSDT", // Chainlink
+  "1INCHUSDT", // 1inch
+  "CVXUSDT", // Convex Finance
+  "BALUSDT", // Balancer
+  "RENUSDT", // Ren
+  "KNCUSDT", // Kyber Network
+  "OXTUSDT", // Orchid
+  "MANAUSDT", // Decentraland
+  "SANDUSDT", // The Sandbox
+  "AXSUSDT", // Axie Infinity
+  "ENJUSDT", // Enjin Coin
+  "RNDRUSDT", // Render Token
+  "HIGHUSDT", // Highstreet
+  "TLMUSDT", // Alien Worlds
+  "MATICUSDT", // Polygon
+  "ARBUSDT", // Arbitrum
+  "OPUSDT", // Optimism
+  "METISUSDT", // MetisDAO
+  "MNTUSDT", // Mantle
+  "SKLUSDT", // SKALE Network
+  "BOBAUSDT", // Boba Network
+  "LRCUSDT", // Loopring
+  "DUSKUSDT", // Dusk Network
+  "XRPUSDT", // Ripple
+  "XLMUSDT", // Stellar
+  "ALGOUSDT", // Algorand
+  "HBARUSDT", // Hedera Hashgraph
+  "QNTUSDT", // Quant
+  "XDCUSDT", // XDC Network
+  "IOSTUSDT", // IOST
+  "NANOUSDT", // Nano
+  "XEMUSDT", // NEM
+  "WAVESUSDT", // Waves
+  "FETUSDT", // Fetch.ai
+  "OCEANUSDT", // Ocean Protocol
+  "AGIXUSDT", // SingularityNET
+  "AKTUSDT", // Akash Network
+  "NMRUSDT", // Numeraire
+  "CTXCUSDT", // Cortex
+  "DTAUSDT", // DATA
+  "PHBUSDT", // Phoenix Global
+  "NKNUSDT", // NKN
+  "RLCUSDT", // iExec RLC
+  "MASKUSDT", // Mask Network
+  "BANDUSDT", // Band Protocol
+  "KEYUSDT", // SelfKey
+  "STXUSDT", // Stacks
+  "PYTHUSDT", // Pyth Network
+  "GRTUSDT", // The Graph
+  "LDOUSDT", // Lido DAO
+  "ARUSDT", // Arweave
+  "RADUSDT", // Radicle
+  "BICOUSDT", // Biconomy
+  "GTCUSDT", // Gitcoin
+  "ENSUSDT", // Ethereum Name Service
+  "ANTUSDT" // Aragon
 ];
-
 const lowVolatilityCrypto = [
-  // Базовые криптовалюты
-  "BTCUSDT", "LTCUSDT", "BCHUSDT", "XMRUSDT", "DASHUSDT",
-  "ETCUSDT", "BSVUSDT", "NEOUSDT", "QTUMUSDT", "ZENUSDT",
-
-  // Стейблкоины и стабильные активы
-  "USDCUSDT", "USDTUSDT", "BUSDUSDT", "DAIUSDT", "TUSDUSDT",
-  "FDUSDUSDT", "PAXGUSDT", "WBTCUSDT", "USTCUSDT", "XAUTUSDT",
-  "EURUSDT", "GBPUSDT", "AUDUSDT", "JPYUSDT", "KRWUSDT",
-
-
-  // Новые добавления с Binance (низкая волатильность)
-  "TWTUSDT", "MDTUSDT", "OGUSDT", "VITEUSDT", "PERLUSDT",
-  "REEFUSDT", "STMXUSDT", "CVCUSDT", "NMRUSDT", "LITUSDT",
-  "UTKUSDT", "RLCUSDT", "MITHUSDT", "COSUSDT", "DOCKUSDT"
+  "BTCUSDT", // Bitcoin
+  "LTCUSDT", // Litecoin
+  "BCHUSDT", // Bitcoin Cash
+  "XMRUSDT", // Monero
+  "DASHUSDT", // Dash
+  "ETCUSDT", // Ethereum Classic
 ];
-
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
 const chatId = '1288898832';
 
