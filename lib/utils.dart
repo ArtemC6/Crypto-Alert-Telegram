@@ -16,3 +16,12 @@ Future<Uint8List?> captureChart(GlobalKey chartKey) async {
     return null;
   }
 }
+
+
+String shortenNumber(double? num) {
+  if (num == null) return '0';
+  if (num >= 1e9) return '${(num / 1e9).toStringAsFixed(1)} B'; // Миллиарды
+  if (num >= 1e6) return '${(num / 1e6).toStringAsFixed(1)} M'; // Миллионы
+  if (num >= 1e3) return '${(num / 1e3).toStringAsFixed(1)} K'; // Тысячи
+  return num.toStringAsFixed(0);
+}

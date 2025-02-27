@@ -22,7 +22,9 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceFeatured, _channelSpotBinanceSpot, _okxChannelOne;
+  WebSocketChannel? _channelSpotBinanceFeatured,
+      _channelSpotBinanceSpot,
+      _okxChannelOne;
 
   late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -62,7 +64,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _fetchTopGainers() async {
     try {
-      final response = await http.get(Uri.parse('https://fapi.binance.com/fapi/v1/ticker/24hr'));
+      final response = await http
+          .get(Uri.parse('https://fapi.binance.com/fapi/v1/ticker/24hr'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
 
@@ -70,15 +73,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             .where((ticker) => ticker['symbol'].endsWith('USDT'))
             .map((ticker) => {
                   'symbol': ticker['symbol'],
-                  'priceChangePercent': double.parse(ticker['priceChangePercent'])
+                  'priceChangePercent':
+                      double.parse(ticker['priceChangePercent'])
                 })
             .toList();
 
-        topGainers.sort((a, b) => b['priceChangePercent'].compareTo(a['priceChangePercent']));
+        topGainers.sort((a, b) =>
+            b['priceChangePercent'].compareTo(a['priceChangePercent']));
 
         coinsListForSelect.addAll(topGainers.take(24).toList());
         coinsListForSelect = coinsListForSelect.toSet().toList();
-        setState(() => selectedCoins.addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
+        setState(() => selectedCoins
+            .addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
 
         _saveSelectedCoins();
       }
@@ -89,7 +95,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _fetchAvailableCoins() async {
     try {
-      final response = await http.get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
+      final response = await http
+          .get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
@@ -101,7 +108,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             .map((symbol) => {'symbol': symbol['symbol']})
             .toList());
 
-        setState(() => selectedCoins.addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
+        setState(() => selectedCoins
+            .addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
       }
     } catch (e) {
       print('Error fetching available coins: $e');
@@ -123,11 +131,14 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         .take(200)
         .toList();
 
-    _okxChannelOne = WebSocketChannel.connect(Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
+    _okxChannelOne = WebSocketChannel.connect(
+        Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
 
     _okxChannelOne!.sink.add(jsonEncode({
       "op": "subscribe",
-      "args": validCoins.map((symbol) => {"channel": "tickers", "instId": symbol}).toList()
+      "args": validCoins
+          .map((symbol) => {"channel": "tickers", "instId": symbol})
+          .toList()
     }));
 
     _okxChannelOne!.stream.listen(
@@ -156,7 +167,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   void _processMessageOKX(dynamic message) {
     final data = json.decode(message);
-    if (data is! Map<String, dynamic> || data['arg'] == null || data['data'] == null) {
+    if (data is! Map<String, dynamic> ||
+        data['arg'] == null ||
+        data['data'] == null) {
       return;
     }
 
@@ -188,10 +201,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     await _channelSpotBinanceFeatured?.sink.close();
     await _channelSpotBinanceSpot?.sink.close();
 
-    String streams = selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
+    String streams =
+        selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
 
-    _channelSpotBinanceFeatured =
-        WebSocketChannel.connect(Uri.parse('wss://fstream.binance.com/ws/$streams'));
+    _channelSpotBinanceFeatured = WebSocketChannel.connect(
+        Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
     // _channelSpotBinanceSpot =
     //     WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
@@ -205,8 +219,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     _channelSpotBinanceFeatured!.stream.listen(
       _processMessageBinance,
-      onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onDone: () =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
       cancelOnError: true,
     );
 
@@ -282,15 +298,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 6).inMinutes);
+          timestamp.difference(entry['timestamp']).inMinutes >=
+          Duration(minutes: 6).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
         final previousPrice = history[history.length - 2]['price'];
-        final changePercentage = ((price - previousPrice) / previousPrice) * 100;
-        final coinIndex = coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
+        final changePercentage =
+            ((price - previousPrice) / previousPrice) * 100;
+        final coinIndex =
+            coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
         if (coinIndex != -1) {
-          setState(() => coinsListBinance[coinIndex]['changePercentage'] = changePercentage);
+          setState(() => coinsListBinance[coinIndex]['changePercentage'] =
+              changePercentage);
         }
       }
     }
@@ -306,34 +326,40 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >= Duration(minutes: 6).inMinutes);
+          timestamp.difference(entry['timestamp']).inMinutes >=
+          Duration(minutes: 6).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
         final previousPrice = history[history.length - 2]['price'];
-        final changePercentage = ((price - previousPrice) / previousPrice) * 100;
-        final coinIndex = coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
+        final changePercentage =
+            ((price - previousPrice) / previousPrice) * 100;
+        final coinIndex =
+            coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
         if (coinIndex != -1) {
-          setState(() => coinsListOKX[coinIndex]['changePercentage'] = changePercentage);
+          setState(() =>
+              coinsListOKX[coinIndex]['changePercentage'] = changePercentage);
         }
       }
     }
   }
 
-  void _checkPriceChangeBinance(String symbol, double currentPrice, DateTime timestamp) {
+  void _checkPriceChangeBinance(
+      String symbol, double currentPrice, DateTime timestamp) {
     for (final timeFrame in timeFrames) {
       _checkTimeFrameBinance(symbol, currentPrice, timestamp, timeFrame);
     }
   }
 
-  void _checkPriceChangeOKX(String symbol, double currentPrice, DateTime timestamp) {
+  void _checkPriceChangeOKX(
+      String symbol, double currentPrice, DateTime timestamp) {
     for (final timeFrame in timeFrames) {
       _checkTimeFrameOKX(symbol, currentPrice, timestamp, timeFrame);
     }
   }
 
-  Future<void> _checkTimeFrameBinance(
-      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) async {
+  Future<void> _checkTimeFrameBinance(String symbol, double currentPrice,
+      DateTime timestamp, Duration timeFrame) async {
     final history = _priceHistoryBinance[symbol];
     if (history == null || history.isEmpty) return;
 
@@ -358,11 +384,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
 
     if (changePercent.abs() >= threshold) {
-      final lastNotificationTime = _lastNotificationTimesAll[symbol]?[timeFrame];
+      final lastNotificationTime =
+          _lastNotificationTimesAll[symbol]?[timeFrame];
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 200)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >=
+              Duration(seconds: 200)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -374,22 +402,63 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
+
+          Map<String, dynamic> coinInfo = await _fetchCoinInfo(symbol);
           if (itemChart != null) {
             Uint8List? chartImage = await captureChart(_chartKey);
 
-            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-                currentPrice, 'Binance', chartImage!);
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              'Binance',
+              chartImage,
+              coinInfo,
+            );
           } else {
-            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-                currentPrice, 'Binance', null);
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              'Binance',
+              null,
+              coinInfo,
+            );
           }
         }
       }
     }
   }
 
-  Future<void> _checkTimeFrameOKX(
-      String symbol, double currentPrice, DateTime timestamp, Duration timeFrame) async {
+  Future<Map<String, dynamic>> _fetchCoinInfo(String symbol) async {
+    try {
+      final response = await http.get(Uri.parse(
+          'https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=$symbol'));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'volume': double.parse(data['volume']),
+          'quoteVolume': double.parse(data['quoteVolume']),
+          'priceChange': double.parse(data['priceChange']),
+          'priceChangePercent': double.parse(data['priceChangePercent']),
+          'highPrice': double.parse(data['highPrice']),
+          'lowPrice': double.parse(data['lowPrice']),
+          'openPrice': double.parse(data['openPrice']),
+        };
+      }
+    } catch (e) {
+      print('Error fetching coin info: $e');
+    }
+    return {};
+  }
+
+  Future<void> _checkTimeFrameOKX(String symbol, double currentPrice,
+      DateTime timestamp, Duration timeFrame) async {
     final history = _priceHistoryOKX[symbol];
     if (history == null || history.isEmpty) return;
 
@@ -414,11 +483,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
 
     if (changePercent.abs() >= threshold) {
-      final lastNotificationTime = _lastNotificationTimesAll[symbol]?[timeFrame];
+      final lastNotificationTime =
+          _lastNotificationTimesAll[symbol]?[timeFrame];
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
 
       if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >= Duration(seconds: 200)) {
+          timestamp.difference(lastNotificationTimeForSymbol) >=
+              Duration(seconds: 200)) {
         if (lastNotificationTime == null ||
             timestamp.difference(lastNotificationTime) >= timeFrame) {
           final timeDifferenceMessage =
@@ -430,14 +501,32 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
+          Map<String, dynamic> coinInfo = await _fetchCoinInfo(symbol);
+
           if (itemChart != null) {
             Uint8List? chartImage = await captureChart(_chartKey);
 
-            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-                currentPrice, 'OKX', chartImage!);
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              'OKX',
+              chartImage,
+              coinInfo,
+            );
           } else {
-            _sendTelegramNotification(symbol, currentPrice, changePercent, timeDifferenceMessage,
-                currentPrice, 'OKX', null);
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              'OKX',
+              null,
+              coinInfo,
+            );
           }
         }
       }
@@ -445,7 +534,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   void _updateCoinsListBinance(String symbol, double price) {
-    final existingCoinIndex = coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
+    final existingCoinIndex =
+        coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
 
     if (existingCoinIndex == -1) {
       setState(() => coinsListBinance.add({
@@ -459,7 +549,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   void _updateCoinsListOKX(String symbol, double price) {
-    final existingCoinIndex = coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
+    final existingCoinIndex =
+        coinsListOKX.indexWhere((coin) => coin['symbol'] == symbol);
 
     if (existingCoinIndex == -1) {
       setState(() => coinsListOKX.add({
@@ -482,12 +573,14 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           'https://api.binance.com/api/v3/klines?symbol=$symbol&interval=5m&limit=$limit'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as List;
-        setState(() => itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        await Future.delayed(Duration(milliseconds: 150), () {});
+        setState(() =>
+            itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
+        await Future.delayed(Duration(milliseconds: 70), () {});
 
         return itemChart;
       } else {
-        print('Failed to load historical data. Status code: ${response.statusCode}');
+        print(
+            'Failed to load historical data. Status code: ${response.statusCode}');
         return null;
       }
     } catch (e) {
@@ -496,7 +589,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     return null;
   }
 
-  String _getTimeDifferenceMessage(DateTime currentTime, DateTime lastUpdateTime) {
+  String _getTimeDifferenceMessage(
+      DateTime currentTime, DateTime lastUpdateTime) {
     final difference = currentTime.difference(lastUpdateTime);
     if (difference.inSeconds < 60) {
       return '${difference.inSeconds} seconds';
@@ -505,33 +599,49 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
+// Обновленный метод отправки уведомления
   Future<void> _sendTelegramNotification(
     String symbol,
-    double changePercentage,
-    double changeDirection,
-    String time,
     double currentPrice,
+    double changePercent,
+    String time,
+    double price,
     String exchange,
     Uint8List? chartImage,
+    Map<String, dynamic> coinInfo, // Добавлен новый параметр
   ) async {
-    final String direction = changeDirection > 0 ? '📈' : '📉';
-
+    final String direction = changePercent > 0 ? '📈' : '📉';
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
+
+    // Форматируем дополнительные данные
+    String additionalInfo = '';
+    if (coinInfo.isNotEmpty) {
+      additionalInfo = '''
+🔸 *Vol:* ${shortenNumber(coinInfo['volume'])}
+🔸 *Q.Vol:* ${shortenNumber(coinInfo['quoteVolume'])} USDT
+🔸 *High:* ${coinInfo['highPrice']?.toStringAsFixed(1)} USD
+🔸 *Low:* ${coinInfo['lowPrice']?.toStringAsFixed(1)} USD
+🔸 *Open:* ${coinInfo['openPrice']?.toStringAsFixed(1)} USD
+''';
+    }
 
     final String caption = '''
 $direction *$symbol ($exchange)* $direction
 
 🔹 *Symbol:* [$symbol]($symbol)
-🔹 *Change:* ${changeDirection.abs().toStringAsFixed(1)}%
+🔹 *Change:* ${changePercent.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
 🔹 *Platform:* $isPlatform
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
 💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
+$additionalInfo
   '''
         .trim();
-    final String url = 'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+
+    final String url =
+        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
 
     try {
       final uri = Uri.parse(url);
@@ -539,14 +649,14 @@ $direction *$symbol ($exchange)* $direction
 
       if (chartImage != null) {
         var request = http.MultipartRequest('POST', uri)
-          ..fields['chat_id'] = chatId ?? ''
-          ..fields['caption'] = caption ?? ''
+          ..fields['chat_id'] = chatId
+          ..fields['caption'] = caption
           ..fields['parse_mode'] = 'Markdown';
 
         request.files.add(http.MultipartFile.fromBytes(
           'photo',
           chartImage,
-          filename: 'chart_${symbol ?? 'unknown'}.png',
+          filename: 'chart_${symbol}.png',
         ));
 
         final streamedResponse = await request.send();
@@ -555,8 +665,8 @@ $direction *$symbol ($exchange)* $direction
         response = await http.post(
           uri,
           body: {
-            'chat_id': chatId ?? '',
-            'caption': caption ?? '',
+            'chat_id': chatId,
+            'caption': caption,
             'parse_mode': 'Markdown',
           },
         );
@@ -638,7 +748,8 @@ $direction *$symbol ($exchange)* $direction
               padding: const EdgeInsets.all(10),
               child: Row(
                 children: [
-                  Text('Price change threshold: ${priceChangeThreshold.toStringAsFixed(1)}%'),
+                  Text(
+                      'Price change threshold: ${priceChangeThreshold.toStringAsFixed(1)}%'),
                   Expanded(
                     child: Slider(
                       value: priceChangeThreshold,
@@ -789,13 +900,17 @@ $direction *$symbol ($exchange)* $direction
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(
-                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
                         ),
                       ),
                       trailing: Text(
                         'Change: ${coin['changePercentage'].toStringAsFixed(1)}%',
                         style: TextStyle(
-                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
                         ),
                       ),
                     );
@@ -813,13 +928,17 @@ $direction *$symbol ($exchange)* $direction
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(
-                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
                         ),
                       ),
                       trailing: Text(
                         'Change: ${coin['changePercentage'].toStringAsFixed(1)}%',
                         style: TextStyle(
-                          color: coin['changePercentage'] < 0 ? Colors.red : Colors.green,
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
                         ),
                       ),
                     );

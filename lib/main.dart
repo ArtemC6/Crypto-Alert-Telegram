@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/status.dart' as status;
@@ -62,7 +63,8 @@ class _WebSocketPageState extends State<WebSocketPage> {
               builder: (context, snapshot) {
                 if (snapshot.hasData) {
                   try {
-                    final Map<String, dynamic> parsedData = jsonDecode(snapshot.data.toString());
+                    final Map<String, dynamic> parsedData =
+                        jsonDecode(snapshot.data.toString());
 
                     print(parsedData);
                     _messages.insert(0, parsedData);
@@ -83,11 +85,13 @@ class _WebSocketPageState extends State<WebSocketPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('🆔 Символ: ${data["mint"]}',
-                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
                               Text('📛 Имя: ${data["name"]}'),
                               Text('💰 Куплено: ${data["initialBuy"]}'),
                               Text('💲 SOL: ${data["solAmount"]}'),
-                              Text('🏦 Рыночная кап. (SOL): ${data["marketCapSol"]}'),
+                              Text(
+                                  '🏦 Рыночная кап. (SOL): ${data["marketCapSol"]}'),
                               Text('🔗 Ссылка: ${data["uri"]}'),
                               Text('🔗 Ссылка: ${data["uri"]}'),
                               Text('🔗 Ссылка: ${data["uri"]}'),
@@ -169,7 +173,9 @@ class _TokenInfoScreenState extends State<TokenInfoScreen> {
       setState(() {
         _slippage = "Failed to fetch data";
       });
-      print('Failed to fetch data: ${response.statusCode}');
+      if (kDebugMode) {
+        print('Failed to fetch data: ${response.statusCode}');
+      }
     }
   }
 
