@@ -26,7 +26,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _channelSpotBinanceSpot,
       _okxChannelOne;
 
-  late List<Map<String, dynamic>> coinsListBinanceFeature,
+  late List<Map<String, dynamic>> _coinsListBinanceFeature,
       coinsListBinanceSpot,
       coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
@@ -53,7 +53,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _storageService = StorageService();
-    coinsListBinanceFeature = [];
+    _coinsListBinanceFeature = [];
     coinsListBinanceSpot = [];
     coinsListOKX = [];
     coinsListForSelect = [];
@@ -233,17 +233,17 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _channelSpotBinanceFeatured = WebSocketChannel.connect(
         Uri.parse('wss://fstream.binance.com/ws/$streams'));
 
-    _channelSpotBinanceSpot = WebSocketChannel.connect(
-        Uri.parse('wss://stream.binance.com/ws/$streams'));
-
-    _channelSpotBinanceSpot!.stream.listen(
-      _processMessageBinanceSpot,
-      onDone: () =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      cancelOnError: true,
-    );
+    // _channelSpotBinanceSpot = WebSocketChannel.connect(
+    //     Uri.parse('wss://stream.binance.com/ws/$streams'));
+    //
+    // _channelSpotBinanceSpot!.stream.listen(
+    //   _processMessageBinanceSpot,
+    //   onDone: () =>
+    //       Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   onError: (error) =>
+    //       Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+    //   cancelOnError: true,
+    // );
 
     _channelSpotBinanceFeatured!.stream.listen(
       _processMessageBinance,
@@ -314,22 +314,22 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     history.add({'price': price, 'timestamp': timestamp});
 
-    if (history.length > 1000) {
+    if (history.length > 500) {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
           timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 5).inMinutes);
+          Duration(minutes: 6).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
         final previousPrice = history[history.length - 2]['price'];
         final changePercentage =
             ((price - previousPrice) / previousPrice) * 100;
-        final coinIndex = coinsListBinanceFeature
+        final coinIndex = _coinsListBinanceFeature
             .indexWhere((coin) => coin['symbol'] == symbol);
         if (coinIndex != -1) {
-          setState(() => coinsListBinanceFeature[coinIndex]
+          setState(() => _coinsListBinanceFeature[coinIndex]
               ['changePercentage'] = changePercentage);
         }
       }
@@ -342,12 +342,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     history.add({'price': price, 'timestamp': timestamp});
 
-    if (history.length > 1000) {
+    if (history.length > 500) {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
           timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 5).inMinutes);
+          Duration(minutes: 6).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -370,12 +370,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     history.add({'price': price, 'timestamp': timestamp});
 
-    if (history.length > 1000) {
+    if (history.length > 500) {
       history.removeAt(0);
     } else {
       history.removeWhere((entry) =>
           timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 5).inMinutes);
+          Duration(minutes: 6).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -457,10 +457,81 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
+          final chartKey = GlobalKey();
+          Uint8List? chartImage;
 
           if (itemChart != null) {
-            Uint8List? chartImage = await captureChart(_chartKey);
+            while (Navigator.of(context).canPop()) {
+              await Future.delayed(Duration(milliseconds: 50));
+            }
 
+            await showDialog(
+              context: context,
+              barrierColor: Colors.transparent,
+              builder: (context) {
+                Future.delayed(Duration(milliseconds: 100), () {
+                  if (Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  }
+                });
+
+                return Dialog(
+                  insetPadding: EdgeInsets.zero, // Removes default padding
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height,
+                      child: RepaintBoundary(
+                        key: chartKey,
+                        child: SfCartesianChart(
+                          backgroundColor: Colors.black,
+                          trackballBehavior: TrackballBehavior(
+                            enable: true,
+                            activationMode: ActivationMode.singleTap,
+                            tooltipAlignment: ChartAlignment.near,
+                          ),
+                          primaryXAxis: NumericAxis(
+                            isVisible: false,
+                          ),
+                          zoomPanBehavior: ZoomPanBehavior(
+                            enablePinching: true,
+                            zoomMode: ZoomMode.xy,
+                            selectionRectBorderWidth: 10,
+                            enablePanning: true,
+                            enableDoubleTapZooming: true,
+                            enableMouseWheelZooming: true,
+                            enableSelectionZooming: true,
+                          ),
+                          series: <CandleSeries>[
+                            CandleSeries<ChartModel, int>(
+                              enableSolidCandles: true,
+                              enableTooltip: true,
+                              dataSource: itemChart,
+                              xValueMapper: (ChartModel sales, _) => sales.time,
+                              lowValueMapper: (ChartModel sales, _) =>
+                                  sales.low,
+                              highValueMapper: (ChartModel sales, _) =>
+                                  sales.high,
+                              openValueMapper: (ChartModel sales, _) =>
+                                  sales.open,
+                              closeValueMapper: (ChartModel sales, _) =>
+                                  sales.close,
+                              animationDuration: 0,
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          }
+
+          chartImage = await captureChart(chartKey);
+
+          if (chartImage != null) {
             _sendTelegramNotification(
               symbol,
               currentPrice,
@@ -520,9 +591,81 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
+          final chartKey = GlobalKey();
+          Uint8List? chartImage;
 
           if (itemChart != null) {
-            Uint8List? chartImage = await captureChart(_chartKey);
+            while (Navigator.of(context).canPop()) {
+              await Future.delayed(Duration(milliseconds: 20));
+            }
+
+            await showDialog(
+              context: context,
+              barrierColor: Colors.transparent,
+              builder: (context) {
+                Future.delayed(Duration(milliseconds: 50), () {
+                  if (Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  }
+                });
+
+                return Dialog(
+                  insetPadding: EdgeInsets.zero, // Removes default padding
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height,
+                      child: RepaintBoundary(
+                        key: chartKey,
+                        child: SfCartesianChart(
+                          backgroundColor: Colors.black,
+                          trackballBehavior: TrackballBehavior(
+                            enable: true,
+                            activationMode: ActivationMode.singleTap,
+                            tooltipAlignment: ChartAlignment.near,
+                          ),
+                          primaryXAxis: NumericAxis(
+                            isVisible: false,
+                          ),
+                          zoomPanBehavior: ZoomPanBehavior(
+                            enablePinching: true,
+                            zoomMode: ZoomMode.xy,
+                            selectionRectBorderWidth: 10,
+                            enablePanning: true,
+                            enableDoubleTapZooming: true,
+                            enableMouseWheelZooming: true,
+                            enableSelectionZooming: true,
+                          ),
+                          series: <CandleSeries>[
+                            CandleSeries<ChartModel, int>(
+                              enableSolidCandles: true,
+                              enableTooltip: true,
+                              dataSource: itemChart,
+                              xValueMapper: (ChartModel sales, _) => sales.time,
+                              lowValueMapper: (ChartModel sales, _) =>
+                                  sales.low,
+                              highValueMapper: (ChartModel sales, _) =>
+                                  sales.high,
+                              openValueMapper: (ChartModel sales, _) =>
+                                  sales.open,
+                              closeValueMapper: (ChartModel sales, _) =>
+                                  sales.close,
+                              animationDuration: 0,
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          }
+
+          chartImage = await captureChart(chartKey);
+
+          if (chartImage != null) {
             _sendTelegramNotification(
               symbol,
               currentPrice,
@@ -582,10 +725,80 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
+          final chartKey = GlobalKey();
+          Uint8List? chartImage;
 
           if (itemChart != null) {
-            Uint8List? chartImage = await captureChart(_chartKey);
+            while (Navigator.of(context).canPop()) {
+              await Future.delayed(Duration(milliseconds: 20));
+            }
+            await showDialog(
+              context: context,
+              barrierColor: Colors.transparent,
+              builder: (context) {
+                Future.delayed(Duration(milliseconds: 50), () {
+                  if (Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  }
+                });
 
+                return Dialog(
+                  insetPadding: EdgeInsets.zero, // Removes default padding
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height,
+                      child: RepaintBoundary(
+                        key: chartKey,
+                        child: SfCartesianChart(
+                          backgroundColor: Colors.black,
+                          trackballBehavior: TrackballBehavior(
+                            enable: true,
+                            activationMode: ActivationMode.singleTap,
+                            tooltipAlignment: ChartAlignment.near,
+                          ),
+                          primaryXAxis: NumericAxis(
+                            isVisible: false,
+                          ),
+                          zoomPanBehavior: ZoomPanBehavior(
+                            enablePinching: true,
+                            zoomMode: ZoomMode.xy,
+                            selectionRectBorderWidth: 10,
+                            enablePanning: true,
+                            enableDoubleTapZooming: true,
+                            enableMouseWheelZooming: true,
+                            enableSelectionZooming: true,
+                          ),
+                          series: <CandleSeries>[
+                            CandleSeries<ChartModel, int>(
+                              enableSolidCandles: true,
+                              enableTooltip: true,
+                              dataSource: itemChart,
+                              xValueMapper: (ChartModel sales, _) => sales.time,
+                              lowValueMapper: (ChartModel sales, _) =>
+                                  sales.low,
+                              highValueMapper: (ChartModel sales, _) =>
+                                  sales.high,
+                              openValueMapper: (ChartModel sales, _) =>
+                                  sales.open,
+                              closeValueMapper: (ChartModel sales, _) =>
+                                  sales.close,
+                              animationDuration: 0,
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          }
+
+          chartImage = await captureChart(chartKey);
+
+          if (chartImage != null) {
             _sendTelegramNotification(
               symbol,
               currentPrice,
@@ -618,18 +831,24 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   void _updateCoinsListBinance(String symbol, double price) {
     final existingCoinIndex =
-        coinsListBinanceFeature.indexWhere((coin) => coin['symbol'] == symbol);
+        _coinsListBinanceFeature.indexWhere((coin) => coin['symbol'] == symbol);
 
     if (existingCoinIndex == -1) {
-      setState(() => coinsListBinanceFeature.add({
-            'symbol': symbol,
-            'price': price,
-            'changePercentage': 0.0,
-          }));
+      _coinsListBinanceFeature.add({
+        'symbol': symbol,
+        'price': price,
+        'changePercentage': 0.0,
+      });
     } else {
-      setState(
-          () => coinsListBinanceFeature[existingCoinIndex]['price'] = price);
+      _coinsListBinanceFeature[existingCoinIndex]['price'] = price;
     }
+
+    setState(() {
+      _coinsListBinanceFeature
+          .where((coin) => selectedCoins.contains(coin['symbol']))
+          .toList()
+          .sort((a, b) => b['price'].compareTo(a['price']));
+    });
   }
 
   void _updateCoinsListOKX(String symbol, double price) {
@@ -655,24 +874,43 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() {});
 
     try {
-      final response = await http.get(Uri.parse(
-          'https://api.binance.com/api/v3/klines?symbol=$symbol&interval=5m&limit=$limit'));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as List;
+      final binanceResponse = await http.get(Uri.parse(
+          'https://fapi.binance.com/fapi/v1/klines?symbol=$symbol&interval=5m&limit=$limit'));
+
+      if (binanceResponse.statusCode == 200) {
+        final data = json.decode(binanceResponse.body) as List;
         setState(() =>
             itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        await Future.delayed(Duration(milliseconds: 50), () {});
-
         return itemChart;
       } else {
-        print(
-            'Failed to load historical data. Status code: ${response.statusCode}');
+        print('Binance API failed. Status code: ${binanceResponse.statusCode}');
+        return await _fetchFromBybit(symbol, limit);
+      }
+    } catch (e) {
+      print('Error fetching from Binance: $e');
+      return await _fetchFromBybit(symbol, limit);
+    }
+  }
+
+  Future<List<ChartModel>?> _fetchFromBybit(String symbol, int limit) async {
+    try {
+      final bybitResponse = await http.get(Uri.parse(
+          'https://api.bybit.com/v5/market/kline?category=spot&symbol=$symbol&interval=5&limit=$limit'));
+
+      if (bybitResponse.statusCode == 200) {
+        final data = json.decode(bybitResponse.body);
+        final List bybitData = data['result']['list'];
+        setState(() => itemChart =
+            bybitData.map((item) => ChartModel.fromJson(item)).toList());
+        return itemChart;
+      } else {
+        print('Bybit API failed. Status code: ${bybitResponse.statusCode}');
         return null;
       }
     } catch (e) {
-      print('Error fetching historical data: $e');
+      print('Error fetching from Bybit: $e');
+      return null;
     }
-    return null;
   }
 
   String _getTimeDifferenceMessage(
@@ -685,7 +923,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-// Обновленный метод отправки уведомления
   Future<void> _sendTelegramNotification(
     String symbol,
     double currentPrice,
@@ -705,7 +942,7 @@ $direction *$symbol ($exchange)* $direction
 🔹 *Symbol:* [$symbol]($symbol)
 🔹 *Change:* ${changePercent.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
-🔹 *Platform:* $isPlatform
+🔹 *Platform:* $exchange
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
 💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
@@ -719,23 +956,22 @@ $direction *$symbol ($exchange)* $direction
       final uri = Uri.parse(url);
       http.Response response;
 
-      if (chartImage != null) {
+      if (chartImage != null && chartImage.isNotEmpty) {
         var request = http.MultipartRequest('POST', uri)
           ..fields['chat_id'] = chatId
           ..fields['caption'] = caption
-          ..fields['parse_mode'] = 'Markdown';
-
-        request.files.add(http.MultipartFile.fromBytes(
-          'photo',
-          chartImage,
-          filename: 'chart_${symbol}.png',
-        ));
+          ..fields['parse_mode'] = 'Markdown'
+          ..files.add(http.MultipartFile.fromBytes(
+            'photo',
+            chartImage,
+            filename: 'chart_${symbol}.png',
+          ));
 
         final streamedResponse = await request.send();
         response = await http.Response.fromStream(streamedResponse);
       } else {
         response = await http.post(
-          uri,
+          uri.replace(path: '/bot$telegramBotToken/sendMessage'),
           body: {
             'chat_id': chatId,
             'caption': caption,
@@ -745,9 +981,10 @@ $direction *$symbol ($exchange)* $direction
       }
 
       if (response.statusCode == 200) {
-        print("Telegram notification with chart sent successfully!");
+        print(
+            "Telegram notification ${chartImage != null ? 'with chart' : 'without chart'} sent successfully!");
       } else {
-        print("Failed to send notification to Telegram. "
+        print("Failed to send notification to Telegram."
             "Status code: ${response.statusCode}. "
             "Response: ${response.body}");
       }
@@ -795,10 +1032,9 @@ $direction *$symbol ($exchange)* $direction
 
   @override
   Widget build(BuildContext context) {
-    final filteredCoinsBinance = coinsListBinanceFeature
+    final filteredCoinsBinance = _coinsListBinanceFeature
         .where((coin) => selectedCoins.contains(coin['symbol']))
-        .toList()
-      ..sort((a, b) => b['price'].compareTo(a['price']));
+        .toList();
 
     final filteredCoinsOKX = coinsListOKX
         .where((coin) => selectedCoins.contains(coin['symbol']))
