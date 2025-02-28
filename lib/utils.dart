@@ -8,7 +8,7 @@ Future<Uint8List?> captureChart(GlobalKey chartKey) async {
   try {
     RenderRepaintBoundary boundary =
         chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-    ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+    ui.Image image = await boundary.toImage(pixelRatio: 1.2);
     ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData?.buffer.asUint8List();
   } catch (e) {
