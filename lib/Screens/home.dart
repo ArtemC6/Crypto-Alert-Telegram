@@ -26,7 +26,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _channelSpotBinanceSpot,
       _okxChannelOne;
 
-  late List<Map<String, dynamic>> coinsListBinance, coinsListOKX;
+  late List<Map<String, dynamic>> coinsListBinanceFeature,
+      coinsListBinanceSpot,
+      coinsListOKX;
   late List<Map<String, dynamic>> coinsListForSelect;
 
   List<String> selectedCoins = [];
@@ -34,15 +36,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool isHide = true, isOKXConnected = true;
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryBinanceSpot = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
+
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
-  final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChart;
-  DateTime? _lastMessageTimeBinance;
-  DateTime? _lastMessageTimeOKX;
-  bool _isMonitoringBinance = false;
-  bool _isMonitoringOKX = false;
+  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX;
+  bool _isMonitoringBinance = false, _isMonitoringOKX = false;
 
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -51,15 +53,28 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _storageService = StorageService();
-    coinsListBinance = [];
+    coinsListBinanceFeature = [];
+    coinsListBinanceSpot = [];
     coinsListOKX = [];
     coinsListForSelect = [];
     itemChart = [];
 
-    _loadSelectedCoins();
     _fetchAvailableCoins();
     _loadPriceChangeThreshold();
-    _loadSelectedCoins();
+  }
+
+  Future<void> _monitorBinanceConnection() async {
+    _isMonitoringBinance = true;
+    while (_isMonitoringBinance) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeBinance != null &&
+          DateTime.now().difference(_lastMessageTimeBinance!).inSeconds >= 30) {
+        print('No data received from Binance for 30 seconds. Reconnecting...');
+        await _connectWebSocketBinance();
+        break;
+      }
+    }
+    _isMonitoringBinance = false;
   }
 
   Future<void> _fetchTopGainers() async {
@@ -81,7 +96,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         topGainers.sort((a, b) =>
             b['priceChangePercent'].compareTo(a['priceChangePercent']));
 
-        coinsListForSelect.addAll(topGainers.take(24).toList());
         coinsListForSelect = coinsListForSelect.toSet().toList();
         setState(() => selectedCoins
             .addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
@@ -111,9 +125,48 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         setState(() => selectedCoins
             .addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
       }
+
+      await _fetchTopGainers();
     } catch (e) {
       print('Error fetching available coins: $e');
     }
+
+    _loadSelectedCoins();
+  }
+
+  void _loadSelectedCoins() async {
+    selectedCoins = await _storageService.loadSelectedCoins();
+    selectedCoins.addAll(cryptoList);
+    setState(() => selectedCoins = selectedCoins.toSet().toList());
+    _connectWebSocketBinance();
+    _connectWebSocketOKX();
+  }
+
+  void _saveSelectedCoins() async {
+    selectedCoins = selectedCoins.toSet().toList();
+    await _storageService.saveSelectedCoins(selectedCoins);
+    _connectWebSocketBinance();
+    _connectWebSocketOKX();
+  }
+
+  void _deleteCoins() async {
+    await _storageService.deleteCoins();
+    setState(() => selectedCoins = []);
+    _connectWebSocketBinance();
+  }
+
+  Future<void> _monitorOKXConnection() async {
+    _isMonitoringOKX = true;
+    while (_isMonitoringOKX) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeOKX != null &&
+          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
+        print('No data received from Binance for 30 seconds. Reconnecting...');
+        await _connectWebSocketOKX();
+        break;
+      }
+    }
+    _isMonitoringOKX = false;
   }
 
   Future<void> _connectWebSocketOKX() async {
@@ -165,6 +218,49 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _connectWebSocketBinance() async {
+    if (selectedCoins.isEmpty) {
+      await _channelSpotBinanceFeatured?.sink.close();
+      await _channelSpotBinanceSpot?.sink.close();
+      return;
+    }
+    await _channelSpotBinanceFeatured?.sink.close();
+    await _channelSpotBinanceSpot?.sink.close();
+
+    String streams =
+        selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
+
+    _channelSpotBinanceFeatured = WebSocketChannel.connect(
+        Uri.parse('wss://fstream.binance.com/ws/$streams'));
+
+    _channelSpotBinanceSpot = WebSocketChannel.connect(
+        Uri.parse('wss://stream.binance.com/ws/$streams'));
+
+    _channelSpotBinanceSpot!.stream.listen(
+      _processMessageBinanceSpot,
+      onDone: () =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      cancelOnError: true,
+    );
+
+    _channelSpotBinanceFeatured!.stream.listen(
+      _processMessageBinance,
+      onDone: () =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      cancelOnError: true,
+    );
+
+    _lastMessageTimeBinance = DateTime.now();
+
+    if (!_isMonitoringBinance) {
+      _monitorBinanceConnection();
+    }
+  }
+
   void _processMessageOKX(dynamic message) {
     final data = json.decode(message);
     if (data is! Map<String, dynamic> ||
@@ -184,96 +280,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (isHide) _updateCoinsListOKX(symbol, price);
   }
 
-  void _loadSelectedCoins() async {
-    selectedCoins = await _storageService.loadSelectedCoins();
-    selectedCoins.addAll(cryptoList);
-    setState(() => selectedCoins = selectedCoins.toSet().toList());
-    _connectWebSocketBinance();
-    _connectWebSocketOKX();
-  }
-
-  Future<void> _connectWebSocketBinance() async {
-    if (selectedCoins.isEmpty) {
-      await _channelSpotBinanceFeatured?.sink.close();
-      await _channelSpotBinanceSpot?.sink.close();
-      return;
-    }
-    await _channelSpotBinanceFeatured?.sink.close();
-    await _channelSpotBinanceSpot?.sink.close();
-
-    String streams =
-        selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
-
-    _channelSpotBinanceFeatured = WebSocketChannel.connect(
-        Uri.parse('wss://fstream.binance.com/ws/$streams'));
-
-    // _channelSpotBinanceSpot =
-    //     WebSocketChannel.connect(Uri.parse('wss://stream.binance.com/ws/$streams'));
-
-    // _channelSpotBinanceSpot!.stream.listen(
-    //   _processMessageBinance,
-    //   onDone: () => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   onError: (error) => Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   cancelOnError: true,
-    // );
-
-    _channelSpotBinanceFeatured!.stream.listen(
-      _processMessageBinance,
-      onDone: () =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      cancelOnError: true,
-    );
-
-    _lastMessageTimeBinance = DateTime.now();
-
-    if (!_isMonitoringBinance) {
-      _monitorBinanceConnection();
-    }
-  }
-
-  Future<void> _monitorBinanceConnection() async {
-    _isMonitoringBinance = true;
-    while (_isMonitoringBinance) {
-      await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeBinance != null &&
-          DateTime.now().difference(_lastMessageTimeBinance!).inSeconds >= 30) {
-        print('No data received from Binance for 30 seconds. Reconnecting...');
-        await _connectWebSocketBinance();
-        break;
-      }
-    }
-    _isMonitoringBinance = false;
-  }
-
-  Future<void> _monitorOKXConnection() async {
-    _isMonitoringOKX = true;
-    while (_isMonitoringOKX) {
-      await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeOKX != null &&
-          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
-        print('No data received from Binance for 30 seconds. Reconnecting...');
-        await _connectWebSocketOKX();
-        break;
-      }
-    }
-    _isMonitoringOKX = false;
-  }
-
-  void _saveSelectedCoins() async {
-    selectedCoins = selectedCoins.toSet().toList();
-    await _storageService.saveSelectedCoins(selectedCoins);
-    _connectWebSocketBinance();
-    _connectWebSocketOKX();
-  }
-
-  void _deleteCoins() async {
-    await _storageService.deleteCoins();
-    setState(() => selectedCoins = []);
-    _connectWebSocketBinance();
-  }
-
   void _processMessageBinance(dynamic message) {
     final data = json.decode(message);
     if (data is! Map<String, dynamic>) return;
@@ -288,6 +294,20 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (isHide) _updateCoinsListBinance(symbol, price);
   }
 
+  void _processMessageBinanceSpot(dynamic message) {
+    final data = json.decode(message);
+    if (data is! Map<String, dynamic>) return;
+
+    final symbol = data['s'];
+    final price = double.parse(data['c']);
+    final timestamp = DateTime.now();
+
+    _lastMessageTimeBinance = timestamp;
+    _storePriceBinanceSpot(symbol, price, timestamp);
+    _checkPriceChangeBinanceSpot(symbol, price, timestamp);
+    if (isHide) _updateCoinsListBinanceSpot(symbol, price);
+  }
+
   void _storePriceBinance(String symbol, double price, DateTime timestamp) {
     _priceHistoryBinance.putIfAbsent(symbol, () => []);
     final history = _priceHistoryBinance[symbol]!;
@@ -299,7 +319,35 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     } else {
       history.removeWhere((entry) =>
           timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 6).inMinutes);
+          Duration(minutes: 5).inMinutes);
+    }
+    if (isHide) {
+      if (history.length > 1) {
+        final previousPrice = history[history.length - 2]['price'];
+        final changePercentage =
+            ((price - previousPrice) / previousPrice) * 100;
+        final coinIndex = coinsListBinanceFeature
+            .indexWhere((coin) => coin['symbol'] == symbol);
+        if (coinIndex != -1) {
+          setState(() => coinsListBinanceFeature[coinIndex]
+              ['changePercentage'] = changePercentage);
+        }
+      }
+    }
+  }
+
+  void _storePriceBinanceSpot(String symbol, double price, DateTime timestamp) {
+    _priceHistoryBinanceSpot.putIfAbsent(symbol, () => []);
+    final history = _priceHistoryBinanceSpot[symbol]!;
+
+    history.add({'price': price, 'timestamp': timestamp});
+
+    if (history.length > 1000) {
+      history.removeAt(0);
+    } else {
+      history.removeWhere((entry) =>
+          timestamp.difference(entry['timestamp']).inMinutes >=
+          Duration(minutes: 5).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -307,9 +355,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final changePercentage =
             ((price - previousPrice) / previousPrice) * 100;
         final coinIndex =
-            coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
+            coinsListBinanceSpot.indexWhere((coin) => coin['symbol'] == symbol);
         if (coinIndex != -1) {
-          setState(() => coinsListBinance[coinIndex]['changePercentage'] =
+          setState(() => coinsListBinanceSpot[coinIndex]['changePercentage'] =
               changePercentage);
         }
       }
@@ -327,7 +375,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     } else {
       history.removeWhere((entry) =>
           timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 6).inMinutes);
+          Duration(minutes: 5).inMinutes);
     }
     if (isHide) {
       if (history.length > 1) {
@@ -351,10 +399,80 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
+  void _checkPriceChangeBinanceSpot(
+      String symbol, double currentPrice, DateTime timestamp) {
+    for (final timeFrame in timeFrames) {
+      _checkTimeFrameBinanceSpot(symbol, currentPrice, timestamp, timeFrame);
+    }
+  }
+
   void _checkPriceChangeOKX(
       String symbol, double currentPrice, DateTime timestamp) {
     for (final timeFrame in timeFrames) {
       _checkTimeFrameOKX(symbol, currentPrice, timestamp, timeFrame);
+    }
+  }
+
+  Future<void> _checkTimeFrameBinanceSpot(String symbol, double currentPrice,
+      DateTime timestamp, Duration timeFrame) async {
+    final history = _priceHistoryBinanceSpot[symbol];
+    if (history == null || history.isEmpty) return;
+
+    final cutoffTime = timestamp.subtract(timeFrame);
+    final oldPriceData = history.lastWhere(
+      (entry) => entry['timestamp'].isBefore(cutoffTime),
+      orElse: () => {},
+    );
+
+    if (oldPriceData.isEmpty) return;
+
+    final oldPrice = oldPriceData['price'];
+    final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
+
+    double threshold = priceChangeThreshold;
+    if (lowVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.60;
+    }
+
+    if (mediumVolatilityCrypto.contains(symbol)) {
+      threshold = priceChangeThreshold * 0.85;
+    }
+
+    if (changePercent.abs() >= threshold) {
+      final lastNotificationTime =
+          _lastNotificationTimesAll[symbol]?[timeFrame];
+      final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
+
+      if (lastNotificationTimeForSymbol == null ||
+          timestamp.difference(lastNotificationTimeForSymbol) >=
+              Duration(seconds: 200)) {
+        if (lastNotificationTime == null ||
+            timestamp.difference(lastNotificationTime) >= timeFrame) {
+          final timeDifferenceMessage =
+              _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
+
+          _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
+          _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
+          _lastNotificationTimes[symbol] = timestamp;
+          history.remove(oldPriceData);
+
+          final itemChart = await _fetchHistoricalData(symbol);
+
+          if (itemChart != null) {
+            Uint8List? chartImage = await captureChart(_chartKey);
+
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              'Binance(S)',
+              chartImage,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -403,58 +521,21 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
           final itemChart = await _fetchHistoricalData(symbol);
 
-          Map<String, dynamic> coinInfo = await _fetchCoinInfo(symbol);
           if (itemChart != null) {
             Uint8List? chartImage = await captureChart(_chartKey);
-
             _sendTelegramNotification(
               symbol,
               currentPrice,
               changePercent,
               timeDifferenceMessage,
               currentPrice,
-              'Binance',
+              'Binance(F)',
               chartImage,
-              coinInfo,
-            );
-          } else {
-            _sendTelegramNotification(
-              symbol,
-              currentPrice,
-              changePercent,
-              timeDifferenceMessage,
-              currentPrice,
-              'Binance',
-              null,
-              coinInfo,
             );
           }
         }
       }
     }
-  }
-
-  Future<Map<String, dynamic>> _fetchCoinInfo(String symbol) async {
-    try {
-      final response = await http.get(Uri.parse(
-          'https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=$symbol'));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return {
-          'volume': double.parse(data['volume']),
-          'quoteVolume': double.parse(data['quoteVolume']),
-          'priceChange': double.parse(data['priceChange']),
-          'priceChangePercent': double.parse(data['priceChangePercent']),
-          'highPrice': double.parse(data['highPrice']),
-          'lowPrice': double.parse(data['lowPrice']),
-          'openPrice': double.parse(data['openPrice']),
-        };
-      }
-    } catch (e) {
-      print('Error fetching coin info: $e');
-    }
-    return {};
   }
 
   Future<void> _checkTimeFrameOKX(String symbol, double currentPrice,
@@ -501,7 +582,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           history.remove(oldPriceData);
 
           final itemChart = await _fetchHistoricalData(symbol);
-          Map<String, dynamic> coinInfo = await _fetchCoinInfo(symbol);
 
           if (itemChart != null) {
             Uint8List? chartImage = await captureChart(_chartKey);
@@ -514,18 +594,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               currentPrice,
               'OKX',
               chartImage,
-              coinInfo,
-            );
-          } else {
-            _sendTelegramNotification(
-              symbol,
-              currentPrice,
-              changePercent,
-              timeDifferenceMessage,
-              currentPrice,
-              'OKX',
-              null,
-              coinInfo,
             );
           }
         }
@@ -533,18 +601,34 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  void _updateCoinsListBinance(String symbol, double price) {
+  void _updateCoinsListBinanceSpot(String symbol, double price) {
     final existingCoinIndex =
-        coinsListBinance.indexWhere((coin) => coin['symbol'] == symbol);
+        coinsListBinanceSpot.indexWhere((coin) => coin['symbol'] == symbol);
 
     if (existingCoinIndex == -1) {
-      setState(() => coinsListBinance.add({
+      setState(() => coinsListBinanceSpot.add({
             'symbol': symbol,
             'price': price,
             'changePercentage': 0.0,
           }));
     } else {
-      setState(() => coinsListBinance[existingCoinIndex]['price'] = price);
+      setState(() => coinsListBinanceSpot[existingCoinIndex]['price'] = price);
+    }
+  }
+
+  void _updateCoinsListBinance(String symbol, double price) {
+    final existingCoinIndex =
+        coinsListBinanceFeature.indexWhere((coin) => coin['symbol'] == symbol);
+
+    if (existingCoinIndex == -1) {
+      setState(() => coinsListBinanceFeature.add({
+            'symbol': symbol,
+            'price': price,
+            'changePercentage': 0.0,
+          }));
+    } else {
+      setState(
+          () => coinsListBinanceFeature[existingCoinIndex]['price'] = price);
     }
   }
 
@@ -568,6 +652,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   ) async {
     int limit = 55;
 
+    setState(() {});
+
     try {
       final response = await http.get(Uri.parse(
           'https://api.binance.com/api/v3/klines?symbol=$symbol&interval=5m&limit=$limit'));
@@ -575,7 +661,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final data = json.decode(response.body) as List;
         setState(() =>
             itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        await Future.delayed(Duration(milliseconds: 70), () {});
+        await Future.delayed(Duration(milliseconds: 50), () {});
 
         return itemChart;
       } else {
@@ -608,23 +694,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     double price,
     String exchange,
     Uint8List? chartImage,
-    Map<String, dynamic> coinInfo, // Добавлен новый параметр
   ) async {
     final String direction = changePercent > 0 ? '📈' : '📉';
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
-
-    // Форматируем дополнительные данные
-    String additionalInfo = '';
-    if (coinInfo.isNotEmpty) {
-      additionalInfo = '''
-🔸 *Vol:* ${shortenNumber(coinInfo['volume'])}
-🔸 *Q.Vol:* ${shortenNumber(coinInfo['quoteVolume'])} USDT
-🔸 *High:* ${coinInfo['highPrice']?.toStringAsFixed(1)} USD
-🔸 *Low:* ${coinInfo['lowPrice']?.toStringAsFixed(1)} USD
-🔸 *Open:* ${coinInfo['openPrice']?.toStringAsFixed(1)} USD
-''';
-    }
 
     final String caption = '''
 $direction *$symbol ($exchange)* $direction
@@ -636,7 +709,6 @@ $direction *$symbol ($exchange)* $direction
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
 💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
-$additionalInfo
   '''
         .trim();
 
@@ -723,7 +795,7 @@ $additionalInfo
 
   @override
   Widget build(BuildContext context) {
-    final filteredCoinsBinance = coinsListBinance
+    final filteredCoinsBinance = coinsListBinanceFeature
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
@@ -783,8 +855,8 @@ $additionalInfo
                               });
                             },
                             child: Text(!isHide
-                                ? '${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'
-                                : '${filteredCoinsBinance.length} : ${filteredCoinsOKX.length}'),
+                                ? 'F ${filteredCoinsBinance.length} : S ${coinsListBinanceSpot.length} : O ${filteredCoinsOKX.length}'
+                                : 'F ${filteredCoinsBinance.length} : S ${coinsListBinanceSpot.length} : O ${filteredCoinsOKX.length}'),
                           ),
                         ),
                       ],
@@ -800,11 +872,6 @@ $additionalInfo
                     child: Icon(Icons.delete, size: 18),
                   ),
                   SizedBox(width: 1),
-                  ElevatedButton(
-                    onPressed: () => _fetchTopGainers(),
-                    child: Text('Top'),
-                  ),
-                  SizedBox(width: 1),
                   CupertinoSwitch(
                     value: isOKXConnected,
                     onChanged: (bool value) {
@@ -815,41 +882,6 @@ $additionalInfo
                 ],
               ),
             ),
-            // if (isHide)
-            //   Expanded(
-            //     child: SingleChildScrollView(
-            //       child: Wrap(
-            //         spacing: 12.0,
-            //         runSpacing: 12.0,
-            //         alignment: WrapAlignment.center,
-            //         children: selectedCoins
-            //             .map((coin) => InkWell(
-            //                   onTap: () => FlutterClipboard.copy(coin).then((_) {
-            //                     _fetchHistoricalData(coin);
-            //                     return ScaffoldMessenger.of(context).showSnackBar(
-            //                       SnackBar(
-            //                         content: Text('Скопировано: $coin'),
-            //                         duration: Duration(seconds: 1),
-            //                       ),
-            //                     );
-            //                   }),
-            //                   child: Container(
-            //                     padding: const EdgeInsets.all(4),
-            //                     decoration: BoxDecoration(
-            //                       border: Border.all(color: Colors.white),
-            //                       borderRadius: BorderRadius.circular(4.0),
-            //                     ),
-            //                     child: Text(
-            //                       coin,
-            //                       style: TextStyle(
-            //                           fontSize: isHide ? 13.5 : 15.5, color: Colors.white),
-            //                     ),
-            //                   ),
-            //                 ))
-            //             .toList(),
-            //       ),
-            //     ),
-            //   ),
             SizedBox(
                 height: myHeight * (isHide ? 0.35 : 0.60),
                 width: kIsWeb ? (myWidth * 0.3 < 200 ? 400 : 400) : myWidth,

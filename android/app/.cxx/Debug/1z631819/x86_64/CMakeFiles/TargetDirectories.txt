@@ -1,0 +1,2 @@
+/Users/adigalaxy/Documents/Flutter Projects/binanse_notification/android/app/.cxx/Debug/1z631819/x86_64/CMakeFiles/edit_cache.dir
+/Users/adigalaxy/Documents/Flutter Projects/binanse_notification/android/app/.cxx/Debug/1z631819/x86_64/CMakeFiles/rebuild_cache.dir
