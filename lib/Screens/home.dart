@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/cupertino.dart';
@@ -14,7 +16,7 @@ import '../model/chart.dart';
 import '../services/storage.dart';
 import '../utils.dart';
 
-enum ExchangeType { binanceSpot, binanceFutures, okx }
+enum ExchangeType { binanceFutures, okx, kucoin }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -24,13 +26,11 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceFeatured,
-      _channelSpotBinanceSpot,
-      _okxChannelOne;
+  WebSocketChannel? _channelSpotBinanceFeatured, _okxChannelOne, _kucoinChannel;
 
   late List<Map<String, dynamic>> _coinsListBinanceFeature,
-      coinsListBinanceSpot,
-      coinsListOKX;
+      coinsListOKX,
+      coinsListKuCoin;
   late List<Map<String, dynamic>> coinsListForSelect;
 
   List<String> selectedCoins = [];
@@ -38,15 +38,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool isHide = true;
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
-  final Map<String, List<Map<String, dynamic>>> _priceHistoryBinanceSpot = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryKuCoin = {};
 
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChart;
-  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX;
-  bool _isMonitoringBinance = false, _isMonitoringOKX = false;
+  DateTime? _lastMessageTimeBinance,
+      _lastMessageTimeOKX,
+      _lastMessageTimeKuCoin;
+  bool _isMonitoringBinance = false,
+      _isMonitoringOKX = false,
+      _isMonitoringKuCoin = false;
 
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -56,8 +60,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     super.initState();
     _storageService = StorageService();
     _coinsListBinanceFeature = [];
-    coinsListBinanceSpot = [];
     coinsListOKX = [];
+    coinsListKuCoin = [];
     coinsListForSelect = [];
     itemChart = [];
 
@@ -79,13 +83,58 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _isMonitoringBinance = false;
   }
 
+  Future<void> _monitorOKXConnection() async {
+    _isMonitoringOKX = true;
+    while (_isMonitoringOKX) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeOKX != null &&
+          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
+        print('No data received from OKX for 30 seconds. Reconnecting...');
+        await _connectWebSocketOKX();
+        break;
+      }
+    }
+    _isMonitoringOKX = false;
+  }
+
+  Future<void> _monitorKuCoinConnection() async {
+    _isMonitoringKuCoin = true;
+    int reconnectAttempts = 0;
+    const maxAttempts = 5;
+
+    while (_isMonitoringKuCoin) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeKuCoin != null &&
+          DateTime.now().difference(_lastMessageTimeKuCoin!).inSeconds >= 30) {
+        print(
+            'No data received from KuCoin for 30 seconds. Attempting reconnect (${reconnectAttempts + 1}/$maxAttempts)...');
+        await _kucoinChannel?.sink.close();
+        await _connectWebSocketKuCoin();
+
+        reconnectAttempts++;
+        if (reconnectAttempts >= maxAttempts) {
+          print(
+              'Max reconnection attempts reached for KuCoin. Pausing for 1 minute...');
+          await Future.delayed(Duration(minutes: 1));
+          reconnectAttempts = 0;
+        } else {
+          await Future.delayed(
+              Duration(seconds: pow(2, reconnectAttempts).toInt()));
+        }
+      } else {
+        reconnectAttempts = 0;
+      }
+    }
+    _isMonitoringKuCoin = false;
+  }
+
   Future<void> _fetchCoinData() async {
     try {
-      final exchangeResponse = await http
+      // Binance Futures
+      final binanceResponse = await http
           .get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
-      if (exchangeResponse.statusCode == 200) {
-        final exchangeData = json.decode(exchangeResponse.body);
-
+      if (binanceResponse.statusCode == 200) {
+        final exchangeData = json.decode(binanceResponse.body);
         coinsListForSelect.addAll((exchangeData['symbols'] as List)
             .where((symbol) =>
                 symbol['status'] == 'TRADING' &&
@@ -93,13 +142,23 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 symbol['contractType'] == 'PERPETUAL')
             .map((symbol) => {'symbol': symbol['symbol']})
             .toList());
-
-        setState(() => selectedCoins
-            .addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
-      } else {
-        print(
-            'Error fetching available coins: Status code ${exchangeResponse.statusCode}');
       }
+
+      // KuCoin
+      final kucoinResponse =
+          await http.get(Uri.parse('https://api.kucoin.com/api/v1/symbols'));
+      if (kucoinResponse.statusCode == 200) {
+        final kucoinData = json.decode(kucoinResponse.body);
+        coinsListForSelect.addAll((kucoinData['data'] as List)
+            .where((symbol) =>
+                symbol['enableTrading'] == true &&
+                symbol['symbol'].endsWith('-USDT'))
+            .map((symbol) => {'symbol': symbol['symbol'].replaceAll('-', '')})
+            .toList());
+      }
+
+      setState(() => selectedCoins
+          .addAll(coinsListForSelect.map((e) => e['symbol'] as String)));
 
       final tickerResponse = await http
           .get(Uri.parse('https://fapi.binance.com/fapi/v1/ticker/24hr'));
@@ -121,13 +180,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         coinsListForSelect = coinsListForSelect.toSet().toList();
         setState(() => selectedCoins
             .addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
-      } else {
-        print(
-            'Error fetching top gainers: Status code ${tickerResponse.statusCode}');
       }
 
       _loadSelectedCoins();
-      // _saveSelectedCoins();
     } catch (e) {
       print('Error fetching coin data: $e');
     }
@@ -139,6 +194,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() => selectedCoins = selectedCoins.toSet().toList());
     _connectWebSocketBinance();
     _connectWebSocketOKX();
+    _connectWebSocketKuCoin();
   }
 
   void _saveSelectedCoins() async {
@@ -146,31 +202,48 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
     _connectWebSocketOKX();
+    _connectWebSocketKuCoin();
   }
 
   void _deleteCoins() async {
     await _storageService.deleteCoins();
     setState(() => selectedCoins = []);
     _connectWebSocketBinance();
+    _connectWebSocketOKX();
+    _connectWebSocketKuCoin();
   }
 
-  Future<void> _monitorOKXConnection() async {
-    _isMonitoringOKX = true;
-    while (_isMonitoringOKX) {
-      await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeOKX != null &&
-          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
-        print('No data received from Binance for 30 seconds. Reconnecting...');
-        await _connectWebSocketOKX();
-        break;
-      }
+  Future<void> _connectWebSocketBinance() async {
+    if (selectedCoins.isEmpty) {
+      await _channelSpotBinanceFeatured?.sink.close();
+      return;
     }
-    _isMonitoringOKX = false;
+    await _channelSpotBinanceFeatured?.sink.close();
+
+    String streams =
+        selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
+
+    _channelSpotBinanceFeatured = WebSocketChannel.connect(
+        Uri.parse('wss://fstream.binance.com/ws/$streams'));
+
+    _channelSpotBinanceFeatured!.stream.listen(
+      _processMessageBinance,
+      onDone: () =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      cancelOnError: true,
+    );
+
+    _lastMessageTimeBinance = DateTime.now();
+
+    if (!_isMonitoringBinance) {
+      _monitorBinanceConnection();
+    }
   }
 
   Future<void> _connectWebSocketOKX() async {
     if (selectedCoins.isEmpty) {
-      print('No coins selected for OKX');
       await _okxChannelOne?.sink.close();
       return;
     }
@@ -209,67 +282,75 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _connectWebSocketBinance() async {
+  Future<void> _connectWebSocketKuCoin() async {
     if (selectedCoins.isEmpty) {
-      await _channelSpotBinanceFeatured?.sink.close();
-      await _channelSpotBinanceSpot?.sink.close();
+      await _kucoinChannel?.sink.close();
+      print('No coins selected for KuCoin, closing connection');
       return;
     }
-    await _channelSpotBinanceFeatured?.sink.close();
-    await _channelSpotBinanceSpot?.sink.close();
 
-    String streams =
-        selectedCoins.map((coin) => '${coin.toLowerCase()}@ticker').join('/');
+    await _kucoinChannel?.sink.close();
 
-    _channelSpotBinanceFeatured = WebSocketChannel.connect(
-        Uri.parse('wss://fstream.binance.com/ws/$streams'));
+    final tokenResponse = await http.post(
+      Uri.parse('https://api.kucoin.com/api/v1/bullet-public'),
+    );
+    if (tokenResponse.statusCode != 200) {
+      print('Failed to get KuCoin WebSocket token: ${tokenResponse.body}');
+      return;
+    }
+    final tokenData = json.decode(tokenResponse.body);
+    final token = tokenData['data']['token'];
 
-    // _channelSpotBinanceSpot = WebSocketChannel.connect(
-    //     Uri.parse('wss://stream.binance.com/ws/$streams'));
-    //
-    // _channelSpotBinanceSpot!.stream.listen(
-    //   _processMessageBinanceSpot,
-    //   onDone: () =>
-    //       Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   onError: (error) =>
-    //       Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-    //   cancelOnError: true,
-    // );
-
-    _channelSpotBinanceFeatured!.stream.listen(
-      _processMessageBinance,
-      onDone: () =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      cancelOnError: true,
+    _kucoinChannel = WebSocketChannel.connect(
+      Uri.parse('wss://ws-api.kucoin.com/endpoint?token=$token'),
     );
 
-    _lastMessageTimeBinance = DateTime.now();
+    final validCoins = selectedCoins
+        .where((coin) => coin.endsWith("USDT"))
+        .map((coin) => '${coin.substring(0, coin.length - 4)}-USDT')
+        .take(100)
+        .toList();
 
-    if (!_isMonitoringBinance) {
-      _monitorBinanceConnection();
+    _kucoinChannel!.sink.add(jsonEncode({
+      "id": DateTime.now().millisecondsSinceEpoch,
+      "type": "subscribe",
+      "topic": "/market/ticker:${validCoins.join(',')}",
+      "privateChannel": false,
+      "response": true
+    }));
+
+    print('Subscribed to KuCoin streams: ${validCoins.length} coins');
+
+    // Ping mechanism for KuCoin (every 15 seconds as per their docs)
+    Timer.periodic(Duration(seconds: 15), (timer) {
+      if (_kucoinChannel == null || _kucoinChannel!.closeCode != null) {
+        timer.cancel();
+        return;
+      }
+      _kucoinChannel!.sink.add(jsonEncode(
+          {"id": DateTime.now().millisecondsSinceEpoch, "type": "ping"}));
+      print('Sent ping to KuCoin');
+    });
+
+    _kucoinChannel!.stream.listen(
+      _processMessageKuCoin,
+      onDone: () {
+        print(
+            'KuCoin WebSocket closed with code: ${_kucoinChannel!.closeCode}');
+        Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
+      },
+      onError: (error) {
+        print('KuCoin WebSocket error: $error');
+        Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
+      },
+      cancelOnError: false,
+    );
+
+    _lastMessageTimeKuCoin = DateTime.now();
+
+    if (!_isMonitoringKuCoin) {
+      _monitorKuCoinConnection();
     }
-  }
-
-  void _processMessageOKX(dynamic message) {
-    final data = json.decode(message);
-    if (data is! Map<String, dynamic> ||
-        data['arg'] == null ||
-        data['data'] == null) {
-      return;
-    }
-
-    final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
-    final price = double.parse(data['data'][0]['last']);
-    final timestamp = DateTime.now();
-
-    _lastMessageTimeOKX = timestamp;
-
-    _storePrice(symbol, price, timestamp, ExchangeType.okx);
-    _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
-
-    _updateCoinsList(symbol, price, ExchangeType.okx);
   }
 
   void _processMessageBinance(dynamic message) {
@@ -286,32 +367,97 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _updateCoinsList(symbol, price, ExchangeType.binanceFutures);
   }
 
-  void _processMessageBinanceSpot(dynamic message) {
+  void _processMessageOKX(dynamic message) {
     final data = json.decode(message);
-    if (data is! Map<String, dynamic>) return;
+    if (data is! Map<String, dynamic> ||
+        data['arg'] == null ||
+        data['data'] == null) {
+      return;
+    }
 
-    final symbol = data['s'];
-    final price = double.parse(data['c']);
+    final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
+    final price = double.parse(data['data'][0]['last']);
     final timestamp = DateTime.now();
 
-    _lastMessageTimeBinance = timestamp;
-    _storePrice(symbol, price, timestamp, ExchangeType.binanceSpot);
-    _checkPriceChange(symbol, price, timestamp, ExchangeType.binanceSpot);
-    _updateCoinsList(symbol, price, ExchangeType.binanceSpot);
+    _lastMessageTimeOKX = timestamp;
+    _storePrice(symbol, price, timestamp, ExchangeType.okx);
+    _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
+    _updateCoinsList(symbol, price, ExchangeType.okx);
+  }
+
+  void _processMessageKuCoin(dynamic message) {
+    try {
+      final data = json.decode(message);
+      if (data is! Map<String, dynamic>) {
+        // print('KuCoin: Received invalid message format: $message');
+        return;
+      }
+
+      // Log the full message for debugging
+      // print('KuCoin: Full message received: $data');
+
+      if (data['type'] == 'pong') {
+        _lastMessageTimeKuCoin = DateTime.now();
+        // print('KuCoin: Received pong');
+        return;
+      }
+
+      if (data['type'] != 'message' || data['data'] == null) {
+        // print('KuCoin: Unexpected message format: $data');
+        return;
+      }
+
+      final topic = data['topic'] as String?;
+      if (topic == null || !topic.startsWith('/market/ticker:')) {
+        // print('KuCoin: Invalid or missing topic: $data');
+        return;
+      }
+
+      // Try to get symbol from data['data']['symbol'] first
+      String? rawSymbol = data['data']['symbol'] as String?;
+
+      // Fallback: Extract symbol from topic if data['data']['symbol'] is null
+      rawSymbol ??= topic.split('/market/ticker:').last;
+
+      final priceStr = data['data']['price'] as String?;
+      final timestamp = DateTime.now();
+
+      if (priceStr == null) {
+        print('KuCoin: Missing symbol or price in message: $data');
+        return;
+      }
+
+      final symbol = rawSymbol.replaceAll('-', '');
+      final price = double.tryParse(priceStr);
+
+      if (price == null) {
+        print('KuCoin: Invalid price format in message: $data');
+        return;
+      }
+
+      print('KuCoin: Received message for symbol: $symbol, price: $price');
+
+      _lastMessageTimeKuCoin = timestamp;
+      _storePrice(symbol, price, timestamp, ExchangeType.kucoin);
+      _checkPriceChange(symbol, price, timestamp, ExchangeType.kucoin);
+      _updateCoinsList(symbol, price, ExchangeType.kucoin);
+    } catch (e) {
+      print('KuCoin: Error processing message: $e, Message: $message');
+    }
   }
 
   void _storePrice(String symbol, double price, DateTime timestamp,
       ExchangeType exchangeType) {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance,
-      ExchangeType.binanceSpot => _priceHistoryBinanceSpot,
       ExchangeType.okx => _priceHistoryOKX,
+      ExchangeType.kucoin => _priceHistoryKuCoin,
     };
 
     final coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
-      ExchangeType.binanceSpot => coinsListBinanceSpot,
       ExchangeType.okx => coinsListOKX,
+      ExchangeType.kucoin => coinsListKuCoin,
     };
 
     history.putIfAbsent(symbol, () => []);
@@ -350,9 +496,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   Future<void> _checkTimeFrame(String symbol, double currentPrice,
       DateTime timestamp, Duration timeFrame, ExchangeType exchangeType) async {
     final history = switch (exchangeType) {
-      ExchangeType.binanceSpot => _priceHistoryBinanceSpot[symbol],
       ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
       ExchangeType.okx => _priceHistoryOKX[symbol],
+      ExchangeType.kucoin => _priceHistoryKuCoin[symbol],
     };
 
     if (history == null || history.isEmpty) return;
@@ -475,9 +621,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
           if (chartImage != null) {
             final exchangeName = switch (exchangeType) {
-              ExchangeType.binanceSpot => 'Binance(S)',
               ExchangeType.binanceFutures => 'Binance(F)',
               ExchangeType.okx => 'OKX',
+              ExchangeType.kucoin => 'KuCoin',
             };
 
             _sendTelegramNotification(
@@ -501,14 +647,14 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     List<Map<String, dynamic>> coinsList;
 
     switch (exchangeType) {
-      case ExchangeType.binanceSpot:
-        coinsList = coinsListBinanceSpot;
-        break;
       case ExchangeType.binanceFutures:
         coinsList = _coinsListBinanceFeature;
         break;
       case ExchangeType.okx:
         coinsList = coinsListOKX;
+        break;
+      case ExchangeType.kucoin:
+        coinsList = coinsListKuCoin;
         break;
     }
 
@@ -556,31 +702,32 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         return itemChart;
       } else {
         print('Binance API failed. Status code: ${binanceResponse.statusCode}');
-        return await _fetchFromByBit(symbol, limit);
+        return await _fetchFromKuCoin(symbol, limit);
       }
     } catch (e) {
       print('Error fetching from Binance: $e');
-      return await _fetchFromByBit(symbol, limit);
+      return await _fetchFromKuCoin(symbol, limit);
     }
   }
 
-  Future<List<ChartModel>?> _fetchFromByBit(String symbol, int limit) async {
+  Future<List<ChartModel>?> _fetchFromKuCoin(String symbol, int limit) async {
     try {
-      final bybitResponse = await http.get(Uri.parse(
-          'https://api.bybit.com/v5/market/kline?category=spot&symbol=$symbol&interval=5&limit=$limit'));
+      final kucoinSymbol = symbol.replaceAll('USDT', '-USDT');
+      final kucoinResponse = await http.get(Uri.parse(
+          'https://api.kucoin.com/api/v1/market/candles?type=5min&symbol=$kucoinSymbol&limit=$limit'));
 
-      if (bybitResponse.statusCode == 200) {
-        final data = json.decode(bybitResponse.body);
-        final List bybitData = data['result']['list'];
+      if (kucoinResponse.statusCode == 200) {
+        final data = json.decode(kucoinResponse.body);
+        final List kucoinData = data['data'];
         setState(() => itemChart =
-            bybitData.map((item) => ChartModel.fromJson(item)).toList());
+            kucoinData.map((item) => ChartModel.fromJson(item)).toList());
         return itemChart;
       } else {
-        print('Bybit API failed. Status code: ${bybitResponse.statusCode}');
+        print('KuCoin API failed. Status code: ${kucoinResponse.statusCode}');
         return null;
       }
     } catch (e) {
-      print('Error fetching from Bybit: $e');
+      print('Error fetching from KuCoin: $e');
       return null;
     }
   }
@@ -696,8 +843,11 @@ $direction *$symbol ($exchange)* $direction
     final filteredCoinsBinance = _coinsListBinanceFeature
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList();
-
     final filteredCoinsOKX = coinsListOKX
+        .where((coin) => selectedCoins.contains(coin['symbol']))
+        .toList()
+      ..sort((a, b) => b['price'].compareTo(a['price']));
+    final filteredCoinsKuCoin = coinsListKuCoin
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
@@ -710,9 +860,7 @@ $direction *$symbol ($exchange)* $direction
         backgroundColor: Colors.black,
         body: Column(
           children: [
-            SizedBox(
-              height: 4,
-            ),
+            SizedBox(height: 4),
             Padding(
               padding: const EdgeInsets.all(10),
               child: Row(
@@ -752,8 +900,8 @@ $direction *$symbol ($exchange)* $direction
                               });
                             },
                             child: Text(!isHide
-                                ? 'F ${filteredCoinsBinance.length} : S ${coinsListBinanceSpot.length} : O ${filteredCoinsOKX.length}'
-                                : 'F ${filteredCoinsBinance.length} : S ${coinsListBinanceSpot.length} : O ${filteredCoinsOKX.length}'),
+                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : K ${filteredCoinsKuCoin.length}'
+                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : K ${filteredCoinsKuCoin.length}'),
                           ),
                         ),
                       ],
@@ -784,9 +932,7 @@ $direction *$symbol ($exchange)* $direction
                       activationMode: ActivationMode.singleTap,
                       tooltipAlignment: ChartAlignment.near,
                     ),
-                    primaryXAxis: NumericAxis(
-                      isVisible: false,
-                    ),
+                    primaryXAxis: NumericAxis(isVisible: false),
                     zoomPanBehavior: ZoomPanBehavior(
                       enablePinching: true,
                       zoomMode: ZoomMode.xy,
@@ -800,7 +946,7 @@ $direction *$symbol ($exchange)* $direction
                       CandleSeries<ChartModel, int>(
                         enableSolidCandles: true,
                         enableTooltip: true,
-                        dataSource: itemChart!,
+                        dataSource: itemChart ?? [],
                         xValueMapper: (ChartModel sales, _) => sales.time,
                         lowValueMapper: (ChartModel sales, _) => sales.low,
                         highValueMapper: (ChartModel sales, _) => sales.high,
@@ -811,6 +957,34 @@ $direction *$symbol ($exchange)* $direction
                     ],
                   ),
                 )),
+            if (isHide)
+              Expanded(
+                child: ListView.builder(
+                  itemCount: filteredCoinsKuCoin.length,
+                  itemBuilder: (context, index) {
+                    final coin = filteredCoinsKuCoin[index];
+                    return ListTile(
+                      title: Text('(KuCoin) ${coin['symbol']}'),
+                      subtitle: Text(
+                        'Price: ${coin['price']}',
+                        style: TextStyle(
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
+                        ),
+                      ),
+                      trailing: Text(
+                        'Change: ${coin['changePercentage'].toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          color: coin['changePercentage'] < 0
+                              ? Colors.red
+                              : Colors.green,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             if (isHide)
               Expanded(
                 child: ListView.builder(
