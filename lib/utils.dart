@@ -25,3 +25,5 @@ String shortenNumber(double? num) {
   if (num >= 1e3) return '${(num / 1e3).toStringAsFixed(1)} K'; // Тысячи
   return num.toStringAsFixed(0);
 }
+
+

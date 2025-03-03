@@ -40,7 +40,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryKuCoin = {};
-
+  final Map<String, double> _volatilityMap = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
@@ -130,7 +130,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _fetchCoinData() async {
     try {
-      // Binance Futures
       final binanceResponse = await http
           .get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
       if (binanceResponse.statusCode == 200) {
@@ -144,7 +143,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             .toList());
       }
 
-      // KuCoin
       final kucoinResponse =
           await http.get(Uri.parse('https://api.kucoin.com/api/v1/symbols'));
       if (kucoinResponse.statusCode == 200) {
@@ -291,6 +289,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     await _kucoinChannel?.sink.close();
 
+    // Получение токена и информации о сервере
     final tokenResponse = await http.post(
       Uri.parse('https://api.kucoin.com/api/v1/bullet-public'),
     );
@@ -300,9 +299,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
     final tokenData = json.decode(tokenResponse.body);
     final token = tokenData['data']['token'];
+    final instanceServers = tokenData['data']['instanceServers'] as List;
+    final endpoint = instanceServers.isNotEmpty
+        ? instanceServers[0]['endpoint']
+        : 'wss://ws-api.kucoin.com/endpoint';
 
+    // Храним время создания токена и предполагаемый срок действия (24 часа)
+    final tokenCreationTime = DateTime.now();
+    const tokenLifetime = Duration(hours: 24);
+    DateTime? tokenExpiryTime = tokenCreationTime.add(tokenLifetime);
+
+    // Подключение к WebSocket
     _kucoinChannel = WebSocketChannel.connect(
-      Uri.parse('wss://ws-api.kucoin.com/endpoint?token=$token'),
+      Uri.parse('$endpoint?token=$token'),
     );
 
     final validCoins = selectedCoins
@@ -321,8 +330,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     print('Subscribed to KuCoin streams: ${validCoins.length} coins');
 
-    // Ping mechanism for KuCoin (every 15 seconds as per their docs)
-    Timer.periodic(Duration(seconds: 15), (timer) {
+    // Ping для поддержания соединения (каждые 15 секунд)
+    Timer? pingTimer;
+    pingTimer = Timer.periodic(Duration(seconds: 10), (timer) {
       if (_kucoinChannel == null || _kucoinChannel!.closeCode != null) {
         timer.cancel();
         return;
@@ -332,15 +342,32 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       print('Sent ping to KuCoin');
     });
 
+    // Таймер для обновления токена за час до истечения
+    Timer? tokenRefreshTimer;
+    tokenRefreshTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+      final now = DateTime.now();
+      final timeUntilExpiry = tokenExpiryTime.difference(now);
+      if (timeUntilExpiry <= Duration(hours: 1)) {
+        print('KuCoin token nearing expiry, refreshing...');
+        timer.cancel(); // Останавливаем проверку
+        pingTimer?.cancel(); // Останавливаем пинг
+        _connectWebSocketKuCoin(); // Переподключаемся с новым токеном
+      }
+    });
+
     _kucoinChannel!.stream.listen(
       _processMessageKuCoin,
       onDone: () {
         print(
             'KuCoin WebSocket closed with code: ${_kucoinChannel!.closeCode}');
+        pingTimer?.cancel();
+        tokenRefreshTimer?.cancel();
         Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
       },
       onError: (error) {
         print('KuCoin WebSocket error: $error');
+        pingTimer?.cancel();
+        tokenRefreshTimer?.cancel();
         Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
       },
       cancelOnError: false,
@@ -388,35 +415,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   void _processMessageKuCoin(dynamic message) {
     try {
       final data = json.decode(message);
-      if (data is! Map<String, dynamic>) {
-        // print('KuCoin: Received invalid message format: $message');
-        return;
-      }
-
-      // Log the full message for debugging
-      // print('KuCoin: Full message received: $data');
+      if (data is! Map<String, dynamic>) return;
 
       if (data['type'] == 'pong') {
         _lastMessageTimeKuCoin = DateTime.now();
-        // print('KuCoin: Received pong');
         return;
       }
 
-      if (data['type'] != 'message' || data['data'] == null) {
-        // print('KuCoin: Unexpected message format: $data');
-        return;
-      }
+      if (data['type'] != 'message' || data['data'] == null) return;
 
       final topic = data['topic'] as String?;
-      if (topic == null || !topic.startsWith('/market/ticker:')) {
-        // print('KuCoin: Invalid or missing topic: $data');
-        return;
-      }
+      if (topic == null || !topic.startsWith('/market/ticker:')) return;
 
-      // Try to get symbol from data['data']['symbol'] first
       String? rawSymbol = data['data']['symbol'] as String?;
-
-      // Fallback: Extract symbol from topic if data['data']['symbol'] is null
       rawSymbol ??= topic.split('/market/ticker:').last;
 
       final priceStr = data['data']['price'] as String?;
@@ -435,8 +446,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         return;
       }
 
-      print('KuCoin: Received message for symbol: $symbol, price: $price');
-
       _lastMessageTimeKuCoin = timestamp;
       _storePrice(symbol, price, timestamp, ExchangeType.kucoin);
       _checkPriceChange(symbol, price, timestamp, ExchangeType.kucoin);
@@ -444,6 +453,24 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     } catch (e) {
       print('KuCoin: Error processing message: $e, Message: $message');
     }
+  }
+
+  // Добавлена функция расчёта волатильности
+  double _calculateVolatility(String symbol, ExchangeType exchangeType) {
+    final history = switch (exchangeType) {
+      ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
+      ExchangeType.okx => _priceHistoryOKX[symbol],
+      ExchangeType.kucoin => _priceHistoryKuCoin[symbol],
+    };
+
+    if (history == null || history.length < 10) return 0.0;
+
+    final prices = history.map((e) => e['price'] as double).toList();
+    final mean = prices.reduce((a, b) => a + b) / prices.length;
+    final variance =
+        prices.map((p) => pow(p - mean, 2)).reduce((a, b) => a + b) /
+            prices.length;
+    return sqrt(variance);
   }
 
   void _storePrice(String symbol, double price, DateTime timestamp,
@@ -472,6 +499,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           timestamp.difference(entry['timestamp']).inMinutes >=
           Duration(minutes: 6).inMinutes);
     }
+
+    // Добавляем расчёт волатильности
+    _volatilityMap[symbol] = _calculateVolatility(symbol, exchangeType);
 
     if (isHide && priceHistory.length > 1) {
       final previousPrice = priceHistory[priceHistory.length - 2]['price'];
@@ -514,14 +544,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final oldPrice = oldPriceData['price'];
     final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
 
-    double threshold = priceChangeThreshold;
+    double baseThreshold = priceChangeThreshold;
+    double adjustedThreshold = baseThreshold;
+
+    final volatility = _volatilityMap[symbol] ?? 0.0;
+    adjustedThreshold = baseThreshold * (1 + volatility / 100);
+
     if (lowVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.60;
+      adjustedThreshold = baseThreshold * 0.40;
     } else if (mediumVolatilityCrypto.contains(symbol)) {
-      threshold = priceChangeThreshold * 0.85;
+      adjustedThreshold = baseThreshold * 0.70;
     }
 
-    if (changePercent.abs() >= threshold) {
+    if (changePercent.abs() >= adjustedThreshold) {
       final lastNotificationTime =
           _lastNotificationTimesAll[symbol]?[timeFrame];
       final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
@@ -543,80 +578,83 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           final chartKey = GlobalKey();
           Uint8List? chartImage;
 
-          if (itemChart != null) {
+          if (itemChart != null && itemChart.isNotEmpty && mounted) {
             while (Navigator.of(context).canPop()) {
-              await Future.delayed(Duration(milliseconds: 10));
+              await Future.delayed(Duration(milliseconds: 20));
             }
 
-            await showDialog(
-              context: context,
-              barrierColor: Colors.transparent,
-              builder: (context) {
-                final height = MediaQuery.of(context).size.height;
+            if (mounted) {
+              await showDialog(
+                context: context,
+                barrierColor: Colors.transparent,
+                builder: (context) {
+                  final height = MediaQuery.of(context).size.height;
 
-                Future.delayed(Duration(milliseconds: 30), () {
-                  if (Navigator.canPop(context)) {
-                    Navigator.pop(context);
-                  }
-                });
+                  Future.delayed(Duration(milliseconds: 50), () {
+                    if (Navigator.canPop(context) && mounted) {
+                      Navigator.pop(context);
+                    }
+                  });
 
-                return Dialog(
-                  insetPadding: EdgeInsets.only(
-                    left: 0,
-                    right: 0,
-                    bottom: height * 0.15,
-                    top: height * 0.15,
-                  ),
-                  child: Scaffold(
-                    backgroundColor: Colors.transparent,
-                    body: SizedBox(
-                      width: MediaQuery.of(context).size.width,
-                      height: MediaQuery.of(context).size.height,
-                      child: RepaintBoundary(
-                        key: chartKey,
-                        child: SfCartesianChart(
-                          backgroundColor: Colors.black,
-                          trackballBehavior: TrackballBehavior(
-                            enable: true,
-                            activationMode: ActivationMode.singleTap,
-                            tooltipAlignment: ChartAlignment.near,
+                  return Dialog(
+                    insetPadding: EdgeInsets.only(
+                      left: 0,
+                      right: 0,
+                      bottom: height * 0.15,
+                      top: height * 0.15,
+                    ),
+                    child: Scaffold(
+                      backgroundColor: Colors.transparent,
+                      body: SizedBox(
+                        width: MediaQuery.of(context).size.width,
+                        height: MediaQuery.of(context).size.height,
+                        child: RepaintBoundary(
+                          key: chartKey,
+                          child: SfCartesianChart(
+                            backgroundColor: Colors.black,
+                            trackballBehavior: TrackballBehavior(
+                              enable: true,
+                              activationMode: ActivationMode.singleTap,
+                              tooltipAlignment: ChartAlignment.near,
+                            ),
+                            primaryXAxis: NumericAxis(isVisible: false),
+                            zoomPanBehavior: ZoomPanBehavior(
+                              enablePinching: true,
+                              zoomMode: ZoomMode.xy,
+                              selectionRectBorderWidth: 10,
+                              enablePanning: true,
+                              enableDoubleTapZooming: true,
+                              enableMouseWheelZooming: true,
+                              enableSelectionZooming: true,
+                            ),
+                            series: <CandleSeries>[
+                              CandleSeries<ChartModel, int>(
+                                enableSolidCandles: true,
+                                enableTooltip: true,
+                                dataSource: itemChart,
+                                xValueMapper: (ChartModel sales, _) =>
+                                    sales.time,
+                                lowValueMapper: (ChartModel sales, _) =>
+                                    sales.low,
+                                highValueMapper: (ChartModel sales, _) =>
+                                    sales.high,
+                                openValueMapper: (ChartModel sales, _) =>
+                                    sales.open,
+                                closeValueMapper: (ChartModel sales, _) =>
+                                    sales.close,
+                                animationDuration: 0,
+                              )
+                            ],
                           ),
-                          primaryXAxis: NumericAxis(isVisible: false),
-                          zoomPanBehavior: ZoomPanBehavior(
-                            enablePinching: true,
-                            zoomMode: ZoomMode.xy,
-                            selectionRectBorderWidth: 10,
-                            enablePanning: true,
-                            enableDoubleTapZooming: true,
-                            enableMouseWheelZooming: true,
-                            enableSelectionZooming: true,
-                          ),
-                          series: <CandleSeries>[
-                            CandleSeries<ChartModel, int>(
-                              enableSolidCandles: true,
-                              enableTooltip: true,
-                              dataSource: itemChart,
-                              xValueMapper: (ChartModel sales, _) => sales.time,
-                              lowValueMapper: (ChartModel sales, _) =>
-                                  sales.low,
-                              highValueMapper: (ChartModel sales, _) =>
-                                  sales.high,
-                              openValueMapper: (ChartModel sales, _) =>
-                                  sales.open,
-                              closeValueMapper: (ChartModel sales, _) =>
-                                  sales.close,
-                              animationDuration: 0,
-                            )
-                          ],
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
-            );
+                  );
+                },
+              );
 
-            chartImage = await captureChart(chartKey);
+              chartImage = await captureChart(chartKey);
+            }
           }
 
           if (chartImage != null) {
@@ -634,6 +672,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               currentPrice,
               exchangeName,
               chartImage,
+              volatility: _volatilityMap[symbol],
             );
           }
         }
@@ -684,9 +723,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<List<ChartModel>?> _fetchHistoricalData(
-    String symbol,
-  ) async {
+  Future<List<ChartModel>?> _fetchHistoricalData(String symbol) async {
     int limit = 55;
 
     setState(() {});
@@ -749,8 +786,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     String time,
     double price,
     String exchange,
-    Uint8List? chartImage,
-  ) async {
+    Uint8List? chartImage, {
+    double? volatility,
+  }) async {
     final String direction = changePercent > 0 ? '📈' : '📉';
     final String binanceUrl =
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
@@ -761,6 +799,7 @@ $direction *$symbol ($exchange)* $direction
 🔹 *Symbol:* [$symbol]($symbol)
 🔹 *Change:* ${changePercent.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
+🔹 *Volatility:* ${volatility?.toStringAsFixed(2) ?? 'N/A'}%
 🔹 *Platform:* $isPlatform
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
@@ -895,9 +934,11 @@ $direction *$symbol ($exchange)* $direction
                           padding: const EdgeInsets.all(4),
                           child: ElevatedButton(
                             onPressed: () {
-                              setState(() {
-                                isHide = !isHide;
-                              });
+                              setState(() => isHide = !isHide);
+
+                              filteredCoinsBinance.clear();
+                              filteredCoinsOKX.clear();
+                              filteredCoinsKuCoin.clear();
                             },
                             child: Text(!isHide
                                 ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : K ${filteredCoinsKuCoin.length}'
