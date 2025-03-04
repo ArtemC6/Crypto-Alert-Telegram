@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
+import 'dart:io'; // Добавлен для GZipCodec
 
 import 'package:binanse_notification/Screens/select_token.dart';
+import 'package:binanse_notification/Screens/twitter_monitor_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +18,7 @@ import '../model/chart.dart';
 import '../services/storage.dart';
 import '../utils.dart';
 
-enum ExchangeType { binanceFutures, okx, kucoin }
+enum ExchangeType { binanceFutures, okx, huobi }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -26,11 +28,11 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceFeatured, _okxChannelOne, _kucoinChannel;
+  WebSocketChannel? _channelSpotBinanceFeatured, _okxChannelOne, _huobiChannel;
 
   late List<Map<String, dynamic>> _coinsListBinanceFeature,
       coinsListOKX,
-      coinsListKuCoin;
+      coinsListHuobi;
   late List<Map<String, dynamic>> coinsListForSelect;
 
   List<String> selectedCoins = [];
@@ -39,18 +41,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
-  final Map<String, List<Map<String, dynamic>>> _priceHistoryKuCoin = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryHuobi = {};
   final Map<String, double> _volatilityMap = {};
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChart;
-  DateTime? _lastMessageTimeBinance,
-      _lastMessageTimeOKX,
-      _lastMessageTimeKuCoin;
+  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
   bool _isMonitoringBinance = false,
       _isMonitoringOKX = false,
-      _isMonitoringKuCoin = false;
+      _isMonitoringHuobi = false;
 
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -61,10 +61,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _storageService = StorageService();
     _coinsListBinanceFeature = [];
     coinsListOKX = [];
-    coinsListKuCoin = [];
+    coinsListHuobi = [];
     coinsListForSelect = [];
     itemChart = [];
-
     _fetchCoinData();
     _loadPriceChangeThreshold();
   }
@@ -97,24 +96,23 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _isMonitoringOKX = false;
   }
 
-  Future<void> _monitorKuCoinConnection() async {
-    _isMonitoringKuCoin = true;
+  Future<void> _monitorHuobiConnection() async {
+    _isMonitoringHuobi = true;
     int reconnectAttempts = 0;
     const maxAttempts = 5;
 
-    while (_isMonitoringKuCoin) {
+    while (_isMonitoringHuobi) {
       await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeKuCoin != null &&
-          DateTime.now().difference(_lastMessageTimeKuCoin!).inSeconds >= 30) {
+      if (_lastMessageTimeHuobi != null &&
+          DateTime.now().difference(_lastMessageTimeHuobi!).inSeconds >= 30) {
         print(
-            'No data received from KuCoin for 30 seconds. Attempting reconnect (${reconnectAttempts + 1}/$maxAttempts)...');
-        await _kucoinChannel?.sink.close();
-        await _connectWebSocketKuCoin();
+            'No data from Huobi for 30 seconds. Attempting reconnect (${reconnectAttempts + 1}/$maxAttempts)...');
+        await _huobiChannel?.sink.close();
+        await _connectWebSocketHuobi();
 
         reconnectAttempts++;
         if (reconnectAttempts >= maxAttempts) {
-          print(
-              'Max reconnection attempts reached for KuCoin. Pausing for 1 minute...');
+          print('Max reconnection attempts reached for Huobi. Pausing...');
           await Future.delayed(Duration(minutes: 1));
           reconnectAttempts = 0;
         } else {
@@ -125,7 +123,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         reconnectAttempts = 0;
       }
     }
-    _isMonitoringKuCoin = false;
+    _isMonitoringHuobi = false;
   }
 
   Future<void> _fetchCoinData() async {
@@ -140,18 +138,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 symbol['symbol'].endsWith('USDT') &&
                 symbol['contractType'] == 'PERPETUAL')
             .map((symbol) => {'symbol': symbol['symbol']})
-            .toList());
-      }
-
-      final kucoinResponse =
-          await http.get(Uri.parse('https://api.kucoin.com/api/v1/symbols'));
-      if (kucoinResponse.statusCode == 200) {
-        final kucoinData = json.decode(kucoinResponse.body);
-        coinsListForSelect.addAll((kucoinData['data'] as List)
-            .where((symbol) =>
-                symbol['enableTrading'] == true &&
-                symbol['symbol'].endsWith('-USDT'))
-            .map((symbol) => {'symbol': symbol['symbol'].replaceAll('-', '')})
             .toList());
       }
 
@@ -192,7 +178,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() => selectedCoins = selectedCoins.toSet().toList());
     _connectWebSocketBinance();
     _connectWebSocketOKX();
-    _connectWebSocketKuCoin();
+    _connectWebSocketHuobi();
   }
 
   void _saveSelectedCoins() async {
@@ -200,7 +186,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
     _connectWebSocketOKX();
-    _connectWebSocketKuCoin();
+    _connectWebSocketHuobi();
   }
 
   void _deleteCoins() async {
@@ -208,7 +194,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() => selectedCoins = []);
     _connectWebSocketBinance();
     _connectWebSocketOKX();
-    _connectWebSocketKuCoin();
+    _connectWebSocketHuobi();
   }
 
   Future<void> _connectWebSocketBinance() async {
@@ -251,7 +237,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final validCoins = selectedCoins
         .where((coin) => coin.endsWith("USDT"))
         .map((coin) => coin.replaceAll("USDT", "-USDT"))
-        .take(200)
         .toList();
 
     _okxChannelOne = WebSocketChannel.connect(
@@ -280,103 +265,71 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _connectWebSocketKuCoin() async {
+  Future<void> _connectWebSocketHuobi() async {
+    // Закрываем существующее соединение, если оно есть
+    await _huobiChannel?.sink.close();
+
+    // Проверяем наличие выбранных монет
     if (selectedCoins.isEmpty) {
-      await _kucoinChannel?.sink.close();
-      print('No coins selected for KuCoin, closing connection');
+      print('No coins selected for Huobi, connection not established');
       return;
     }
 
-    await _kucoinChannel?.sink.close();
+    try {
+      // Устанавливаем соединение
+      _huobiChannel = WebSocketChannel.connect(Uri.parse('wss://api.huobi.pro/ws'));
 
-    // Получение токена и информации о сервере
-    final tokenResponse = await http.post(
-      Uri.parse('https://api.kucoin.com/api/v1/bullet-public'),
-    );
-    if (tokenResponse.statusCode != 200) {
-      print('Failed to get KuCoin WebSocket token: ${tokenResponse.body}');
-      return;
-    }
-    final tokenData = json.decode(tokenResponse.body);
-    final token = tokenData['data']['token'];
-    final instanceServers = tokenData['data']['instanceServers'] as List;
-    final endpoint = instanceServers.isNotEmpty
-        ? instanceServers[0]['endpoint']
-        : 'wss://ws-api.kucoin.com/endpoint';
+      // Фильтруем и преобразуем монеты
+      final validCoins = selectedCoins
+          .where((coin) => coin.endsWith('USDT'))
+          .map((coin) => coin.toLowerCase())
+          .toList();
 
-    // Храним время создания токена и предполагаемый срок действия (24 часа)
-    final tokenCreationTime = DateTime.now();
-    const tokenLifetime = Duration(hours: 24);
-    DateTime? tokenExpiryTime = tokenCreationTime.add(tokenLifetime);
-
-    // Подключение к WebSocket
-    _kucoinChannel = WebSocketChannel.connect(
-      Uri.parse('$endpoint?token=$token'),
-    );
-
-    final validCoins = selectedCoins
-        .where((coin) => coin.endsWith("USDT"))
-        .map((coin) => '${coin.substring(0, coin.length - 4)}-USDT')
-        .take(100)
-        .toList();
-
-    _kucoinChannel!.sink.add(jsonEncode({
-      "id": DateTime.now().millisecondsSinceEpoch,
-      "type": "subscribe",
-      "topic": "/market/ticker:${validCoins.join(',')}",
-      "privateChannel": false,
-      "response": true
-    }));
-
-    print('Subscribed to KuCoin streams: ${validCoins.length} coins');
-
-    // Ping для поддержания соединения (каждые 15 секунд)
-    Timer? pingTimer;
-    pingTimer = Timer.periodic(Duration(seconds: 10), (timer) {
-      if (_kucoinChannel == null || _kucoinChannel!.closeCode != null) {
-        timer.cancel();
-        return;
+      // Подписываемся на стримы
+      for (var symbol in validCoins) {
+        _huobiChannel!.sink.add(jsonEncode({
+          'sub': 'market.$symbol.ticker',
+          'id': symbol,
+        }));
       }
-      _kucoinChannel!.sink.add(jsonEncode(
-          {"id": DateTime.now().millisecondsSinceEpoch, "type": "ping"}));
-      print('Sent ping to KuCoin');
-    });
 
-    // Таймер для обновления токена за час до истечения
-    Timer? tokenRefreshTimer;
-    tokenRefreshTimer = Timer.periodic(Duration(minutes: 1), (timer) {
-      final now = DateTime.now();
-      final timeUntilExpiry = tokenExpiryTime.difference(now);
-      if (timeUntilExpiry <= Duration(hours: 1)) {
-        print('KuCoin token nearing expiry, refreshing...');
-        timer.cancel(); // Останавливаем проверку
-        pingTimer?.cancel(); // Останавливаем пинг
-        _connectWebSocketKuCoin(); // Переподключаемся с новым токеном
+      // Настраиваем периодический пинг для поддержания соединения
+      Timer? pingTimer;
+      pingTimer = Timer.periodic(Duration(seconds: 10), (timer) {
+        if (_huobiChannel?.closeCode != null) {
+          timer.cancel();
+          return;
+        }
+        _huobiChannel!.sink.add(jsonEncode({
+          'ping': DateTime.now().millisecondsSinceEpoch,
+        }));
+      });
+
+      // Слушаем поток сообщений
+      _huobiChannel!.stream.listen(
+        _processMessageHuobi,
+        onDone: () {
+          // print('Huobi WebSocket closed with code: ${_huobiChannel!.closeCode}');
+          pingTimer?.cancel();
+          Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
+        },
+        onError: (error) {
+          print('Huobi WebSocket error: $error');
+          pingTimer?.cancel();
+          Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
+        },
+        cancelOnError: false,
+      );
+
+      _lastMessageTimeHuobi = DateTime.now();
+
+      // Запускаем мониторинг, если он еще не активен
+      if (!_isMonitoringHuobi) {
+        _monitorHuobiConnection();
       }
-    });
-
-    _kucoinChannel!.stream.listen(
-      _processMessageKuCoin,
-      onDone: () {
-        print(
-            'KuCoin WebSocket closed with code: ${_kucoinChannel!.closeCode}');
-        pingTimer?.cancel();
-        tokenRefreshTimer?.cancel();
-        Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
-      },
-      onError: (error) {
-        print('KuCoin WebSocket error: $error');
-        pingTimer?.cancel();
-        tokenRefreshTimer?.cancel();
-        Future.delayed(Duration(seconds: 5), _connectWebSocketKuCoin);
-      },
-      cancelOnError: false,
-    );
-
-    _lastMessageTimeKuCoin = DateTime.now();
-
-    if (!_isMonitoringKuCoin) {
-      _monitorKuCoinConnection();
+    } catch (e) {
+      print('Failed to connect to Huobi WebSocket: $e');
+      Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
     }
   }
 
@@ -412,55 +365,59 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _updateCoinsList(symbol, price, ExchangeType.okx);
   }
 
-  void _processMessageKuCoin(dynamic message) {
+  void _processMessageHuobi(dynamic message) {
     try {
-      final data = json.decode(message);
+      String jsonString;
+      if (message is Uint8List) {
+        final decompressed = GZipCodec().decode(message);
+        jsonString = utf8.decode(decompressed);
+      } else if (message is String) {
+        jsonString = message;
+      } else {
+        print('Huobi: Unexpected message type: ${message.runtimeType}');
+        return;
+      }
+
+      final data = json.decode(jsonString);
       if (data is! Map<String, dynamic>) return;
 
-      if (data['type'] == 'pong') {
-        _lastMessageTimeKuCoin = DateTime.now();
+      if (data.containsKey('ping')) {
+        _huobiChannel!.sink.add(jsonEncode({"pong": data['ping']}));
+        _lastMessageTimeHuobi = DateTime.now();
         return;
       }
 
-      if (data['type'] != 'message' || data['data'] == null) return;
+      if (data['ch'] == null || data['tick'] == null) return;
 
-      final topic = data['topic'] as String?;
-      if (topic == null || !topic.startsWith('/market/ticker:')) return;
+      final channel = data['ch'] as String;
+      if (!channel.contains('market.') || !channel.endsWith('.ticker')) return;
 
-      String? rawSymbol = data['data']['symbol'] as String?;
-      rawSymbol ??= topic.split('/market/ticker:').last;
-
-      final priceStr = data['data']['price'] as String?;
-      final timestamp = DateTime.now();
+      final symbol = channel.split('.')[1].toUpperCase();
+      final priceStr = data['tick']['lastPrice'] as dynamic;
+      final timestamp = DateTime.fromMillisecondsSinceEpoch(data['ts'] as int);
 
       if (priceStr == null) {
-        print('KuCoin: Missing symbol or price in message: $data');
+        print('Huobi: Missing price in message: $data');
         return;
       }
 
-      final symbol = rawSymbol.replaceAll('-', '');
-      final price = double.tryParse(priceStr);
+      final price =
+          priceStr is String ? double.parse(priceStr) : priceStr.toDouble();
 
-      if (price == null) {
-        print('KuCoin: Invalid price format in message: $data');
-        return;
-      }
-
-      _lastMessageTimeKuCoin = timestamp;
-      _storePrice(symbol, price, timestamp, ExchangeType.kucoin);
-      _checkPriceChange(symbol, price, timestamp, ExchangeType.kucoin);
-      _updateCoinsList(symbol, price, ExchangeType.kucoin);
+      _lastMessageTimeHuobi = timestamp;
+      _storePrice(symbol, price, timestamp, ExchangeType.huobi);
+      _checkPriceChange(symbol, price, timestamp, ExchangeType.huobi);
+      _updateCoinsList(symbol, price, ExchangeType.huobi);
     } catch (e) {
-      print('KuCoin: Error processing message: $e, Message: $message');
+      print('Huobi: Error processing message: $e, Message: $message');
     }
   }
 
-  // Добавлена функция расчёта волатильности
   double _calculateVolatility(String symbol, ExchangeType exchangeType) {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
       ExchangeType.okx => _priceHistoryOKX[symbol],
-      ExchangeType.kucoin => _priceHistoryKuCoin[symbol],
+      ExchangeType.huobi => _priceHistoryHuobi[symbol],
     };
 
     if (history == null || history.length < 10) return 0.0;
@@ -478,13 +435,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance,
       ExchangeType.okx => _priceHistoryOKX,
-      ExchangeType.kucoin => _priceHistoryKuCoin,
+      ExchangeType.huobi => _priceHistoryHuobi,
     };
 
     final coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
       ExchangeType.okx => coinsListOKX,
-      ExchangeType.kucoin => coinsListKuCoin,
+      ExchangeType.huobi => coinsListHuobi,
     };
 
     history.putIfAbsent(symbol, () => []);
@@ -500,7 +457,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           Duration(minutes: 6).inMinutes);
     }
 
-    // Добавляем расчёт волатильности
     _volatilityMap[symbol] = _calculateVolatility(symbol, exchangeType);
 
     if (isHide && priceHistory.length > 1) {
@@ -528,7 +484,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
       ExchangeType.okx => _priceHistoryOKX[symbol],
-      ExchangeType.kucoin => _priceHistoryKuCoin[symbol],
+      ExchangeType.huobi => _priceHistoryHuobi[symbol],
     };
 
     if (history == null || history.isEmpty) return;
@@ -661,7 +617,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             final exchangeName = switch (exchangeType) {
               ExchangeType.binanceFutures => 'Binance(F)',
               ExchangeType.okx => 'OKX',
-              ExchangeType.kucoin => 'KuCoin',
+              ExchangeType.huobi => 'Huobi',
             };
 
             _sendTelegramNotification(
@@ -692,8 +648,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       case ExchangeType.okx:
         coinsList = coinsListOKX;
         break;
-      case ExchangeType.kucoin:
-        coinsList = coinsListKuCoin;
+      case ExchangeType.huobi:
+        coinsList = coinsListHuobi;
         break;
     }
 
@@ -739,32 +695,44 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         return itemChart;
       } else {
         print('Binance API failed. Status code: ${binanceResponse.statusCode}');
-        return await _fetchFromKuCoin(symbol, limit);
+        return await _fetchFromHuobi(symbol, limit);
       }
     } catch (e) {
       print('Error fetching from Binance: $e');
-      return await _fetchFromKuCoin(symbol, limit);
+      return await _fetchFromHuobi(symbol, limit);
     }
   }
 
-  Future<List<ChartModel>?> _fetchFromKuCoin(String symbol, int limit) async {
+  Future<List<ChartModel>?> _fetchFromHuobi(String symbol, int limit) async {
     try {
-      final kucoinSymbol = symbol.replaceAll('USDT', '-USDT');
-      final kucoinResponse = await http.get(Uri.parse(
-          'https://api.kucoin.com/api/v1/market/candles?type=5min&symbol=$kucoinSymbol&limit=$limit'));
+      final huobiSymbol = symbol.toLowerCase();
+      final huobiResponse = await http.get(Uri.parse(
+          'https://api.huobi.pro/market/history/kline?period=5min&size=$limit&symbol=$huobiSymbol'));
 
-      if (kucoinResponse.statusCode == 200) {
-        final data = json.decode(kucoinResponse.body);
-        final List kucoinData = data['data'];
-        setState(() => itemChart =
-            kucoinData.map((item) => ChartModel.fromJson(item)).toList());
-        return itemChart;
+      if (huobiResponse.statusCode == 200) {
+        final data = json.decode(huobiResponse.body);
+        if (data['status'] == 'ok') {
+          final klineData = data['data'] as List;
+          setState(() => itemChart = klineData
+              .map((item) => ChartModel(
+                    time: item['id'].toDouble(),
+                    open: item['open'].toDouble(),
+                    high: item['high'].toDouble(),
+                    low: item['low'].toDouble(),
+                    close: item['close'].toDouble(),
+                  ))
+              .toList());
+          return itemChart;
+        } else {
+          print('Huobi API error: ${data['err-msg']}');
+          return null;
+        }
       } else {
-        print('KuCoin API failed. Status code: ${kucoinResponse.statusCode}');
+        print('Huobi API failed. Status code: ${huobiResponse.statusCode}');
         return null;
       }
     } catch (e) {
-      print('Error fetching from KuCoin: $e');
+      print('Error fetching from Huobi: $e');
       return null;
     }
   }
@@ -881,12 +849,14 @@ $direction *$symbol ($exchange)* $direction
   Widget build(BuildContext context) {
     final filteredCoinsBinance = _coinsListBinanceFeature
         .where((coin) => selectedCoins.contains(coin['symbol']))
-        .toList();
+        .toList()..sort((a, b) => b['price'].compareTo(a['price']));
+
     final filteredCoinsOKX = coinsListOKX
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
-    final filteredCoinsKuCoin = coinsListKuCoin
+
+    final filteredCoinsHuobi = coinsListHuobi
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
@@ -938,11 +908,11 @@ $direction *$symbol ($exchange)* $direction
 
                               filteredCoinsBinance.clear();
                               filteredCoinsOKX.clear();
-                              filteredCoinsKuCoin.clear();
+                              filteredCoinsHuobi.clear();
                             },
                             child: Text(!isHide
-                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : K ${filteredCoinsKuCoin.length}'
-                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : K ${filteredCoinsKuCoin.length}'),
+                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
+                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'),
                           ),
                         ),
                       ],
@@ -958,6 +928,19 @@ $direction *$symbol ($exchange)* $direction
                     child: Icon(Icons.delete, size: 18),
                   ),
                   SizedBox(width: 1),
+                  ElevatedButton(
+                    onPressed: () async {
+                      _coinsListBinanceFeature = [];
+                      coinsListOKX = [];
+                      coinsListHuobi = [];
+                      coinsListForSelect = [];
+                      itemChart = [];
+                      setState(() {});
+                      _fetchCoinData();
+                      _loadPriceChangeThreshold();
+                    },
+                    child: Icon(Icons.refresh, size: 18),
+                  ),
                 ],
               ),
             ),
@@ -1001,11 +984,11 @@ $direction *$symbol ($exchange)* $direction
             if (isHide)
               Expanded(
                 child: ListView.builder(
-                  itemCount: filteredCoinsKuCoin.length,
+                  itemCount: filteredCoinsHuobi.length,
                   itemBuilder: (context, index) {
-                    final coin = filteredCoinsKuCoin[index];
+                    final coin = filteredCoinsHuobi[index];
                     return ListTile(
-                      title: Text('(KuCoin) ${coin['symbol']}'),
+                      title: Text('(Huobi) ${coin['symbol']}'),
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(
