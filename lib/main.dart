@@ -16,7 +16,9 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
+
         brightness: Brightness.dark,
         primarySwatch: Colors.blue,
       ),
@@ -43,6 +45,8 @@ class _WebSocketPageState extends State<WebSocketPage> {
   @override
   void dispose() {
     _channel.sink.close(status.goingAway);
+
+
     super.dispose();
   }
 
@@ -50,6 +54,7 @@ class _WebSocketPageState extends State<WebSocketPage> {
   void initState() {
     super.initState();
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +75,8 @@ class _WebSocketPageState extends State<WebSocketPage> {
                     _messages.insert(0, parsedData);
                     if (_messages.length > 1) _messages.removeLast();
                   } catch (e) {
+                    _channel.sink.add(
+                        '{"method": "subscribeTokenTrade", "keys": ["9XxwT2umxtsgygx2FTxZg79KN4k2dKaktCHqBDQBpump"]}');
                     print('Ошибка парсинга JSON: $e');
                   }
 
@@ -110,9 +117,9 @@ class _WebSocketPageState extends State<WebSocketPage> {
             padding: const EdgeInsets.all(8.0),
             child: ElevatedButton(
               onPressed: () {
+
+
                 // _channel.sink.add('{"method": "subscribeNewToken"}');
-                _channel.sink.add(
-                    '{"method": "subscribeTokenTrade", "keys": ["9XxwT2umxtsgygx2FTxZg79KN4k2dKaktCHqBDQBpump"]}');
 
                 // payload = {
                 //   "method": "subscribeTokenTrade",
@@ -157,6 +164,7 @@ class _TokenInfoScreenState extends State<TokenInfoScreen> {
   String _slippage = "Fetching...";
 
   Future<void> _fetchTokenInfo() async {
+
     final tokenAddress = _tokenAddressController.text;
     final response = await http.get(
       Uri.parse(
@@ -180,12 +188,14 @@ class _TokenInfoScreenState extends State<TokenInfoScreen> {
   }
 
   @override
+
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Token Info')),
+      appBar: AppBar(title: Text('Token Info'), ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
+
           children: [
             TextField(
               controller: _tokenAddressController,
@@ -199,7 +209,8 @@ class _TokenInfoScreenState extends State<TokenInfoScreen> {
               onPressed: _fetchTokenInfo,
               child: Text('Fetch Info'),
             ),
-            SizedBox(height: 16),
+            SizedBox(height: 16, ),
+
             Text('Recommended Slippage: $_slippage'),
           ],
         ),

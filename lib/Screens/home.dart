@@ -9,6 +9,7 @@ import 'package:binanse_notification/Screens/twitter_monitor_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -16,7 +17,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../const.dart';
 import '../model/chart.dart';
 import '../services/storage.dart';
+
 import '../utils.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 enum ExchangeType { binanceFutures, okx, huobi }
 
@@ -46,7 +49,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
-  List<ChartModel>? itemChart;
+  List<ChartModel>? itemChartMain;
   DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
   bool _isMonitoringBinance = false,
       _isMonitoringOKX = false,
@@ -63,7 +66,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     coinsListOKX = [];
     coinsListHuobi = [];
     coinsListForSelect = [];
-    itemChart = [];
+    itemChartMain = [];
     _fetchCoinData();
     _loadPriceChangeThreshold();
   }
@@ -161,7 +164,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         topGainers.sort((a, b) =>
             b['priceChangePercent'].compareTo(a['priceChangePercent']));
 
-        coinsListForSelect = coinsListForSelect.toSet().toList();
         setState(() => selectedCoins
             .addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
       }
@@ -173,9 +175,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   void _loadSelectedCoins() async {
-    selectedCoins = await _storageService.loadSelectedCoins();
     selectedCoins.addAll(cryptoList);
+
+    coinsListForSelect = coinsListForSelect.toSet().toList();
     setState(() => selectedCoins = selectedCoins.toSet().toList());
+    // selectedCoins = await _storageService.loadSelectedCoins();
+
     _connectWebSocketBinance();
     _connectWebSocketOKX();
     _connectWebSocketHuobi();
@@ -266,26 +271,22 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _connectWebSocketHuobi() async {
-    // Закрываем существующее соединение, если оно есть
     await _huobiChannel?.sink.close();
 
-    // Проверяем наличие выбранных монет
     if (selectedCoins.isEmpty) {
       print('No coins selected for Huobi, connection not established');
       return;
     }
 
     try {
-      // Устанавливаем соединение
-      _huobiChannel = WebSocketChannel.connect(Uri.parse('wss://api.huobi.pro/ws'));
+      _huobiChannel =
+          WebSocketChannel.connect(Uri.parse('wss://api.huobi.pro/ws'));
 
-      // Фильтруем и преобразуем монеты
       final validCoins = selectedCoins
           .where((coin) => coin.endsWith('USDT'))
           .map((coin) => coin.toLowerCase())
           .toList();
 
-      // Подписываемся на стримы
       for (var symbol in validCoins) {
         _huobiChannel!.sink.add(jsonEncode({
           'sub': 'market.$symbol.ticker',
@@ -293,29 +294,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         }));
       }
 
-      // Настраиваем периодический пинг для поддержания соединения
-      Timer? pingTimer;
-      pingTimer = Timer.periodic(Duration(seconds: 10), (timer) {
-        if (_huobiChannel?.closeCode != null) {
-          timer.cancel();
-          return;
-        }
-        _huobiChannel!.sink.add(jsonEncode({
-          'ping': DateTime.now().millisecondsSinceEpoch,
-        }));
-      });
-
-      // Слушаем поток сообщений
       _huobiChannel!.stream.listen(
         _processMessageHuobi,
         onDone: () {
-          // print('Huobi WebSocket closed with code: ${_huobiChannel!.closeCode}');
-          pingTimer?.cancel();
           Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
         },
         onError: (error) {
           print('Huobi WebSocket error: $error');
-          pingTimer?.cancel();
           Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
         },
         cancelOnError: false,
@@ -323,7 +308,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
       _lastMessageTimeHuobi = DateTime.now();
 
-      // Запускаем мониторинг, если он еще не активен
       if (!_isMonitoringHuobi) {
         _monitorHuobiConnection();
       }
@@ -503,9 +487,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     double baseThreshold = priceChangeThreshold;
     double adjustedThreshold = baseThreshold;
 
-    final volatility = _volatilityMap[symbol] ?? 0.0;
-    adjustedThreshold = baseThreshold * (1 + volatility / 100);
-
     if (lowVolatilityCrypto.contains(symbol)) {
       adjustedThreshold = baseThreshold * 0.40;
     } else if (mediumVolatilityCrypto.contains(symbol)) {
@@ -534,20 +515,41 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           final chartKey = GlobalKey();
           Uint8List? chartImage;
 
-          if (itemChart != null && itemChart.isNotEmpty && mounted) {
-            while (Navigator.of(context).canPop()) {
-              await Future.delayed(Duration(milliseconds: 20));
-            }
+          double? lastCandleAddPercent;
+          double? lastCandlePriceChangePercent;
+          bool isLastCandleAdd = false;
+          if (itemChart != null && itemChart.length >= 2) {
+            final lastCandle = itemChart.last;
+            final prevCandle = itemChart[itemChart.length - 2];
+            lastCandlePriceChangePercent =
+                ((lastCandle.close! - prevCandle.close!) / prevCandle.close!) *
+                    100.abs();
 
-            if (mounted) {
+            lastCandleAddPercent = lastCandlePriceChangePercent +
+                (lastCandlePriceChangePercent * 0.4);
+            isLastCandleAdd = lastCandleAddPercent.abs() >= changePercent.abs();
+          }
+
+          if (isLastCandleAdd) {
+            if (itemChart != null && itemChart.isNotEmpty) {
+              print('\n' * 100);
+              print(symbol);
+              AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+
+              setState(() => itemChartMain = itemChart);
+              while (Navigator.of(context).canPop()) {
+                await SchedulerBinding.instance.endOfFrame;
+                await Future.delayed(Duration(milliseconds: 20));
+              }
+
               await showDialog(
                 context: context,
                 barrierColor: Colors.transparent,
                 builder: (context) {
                   final height = MediaQuery.of(context).size.height;
 
-                  Future.delayed(Duration(milliseconds: 50), () {
-                    if (Navigator.canPop(context) && mounted) {
+                  Future.delayed(Duration(milliseconds: 100), () async {
+                    if (mounted && Navigator.canPop(context)) {
                       Navigator.pop(context);
                     }
                   });
@@ -611,25 +613,27 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
               chartImage = await captureChart(chartKey);
             }
-          }
 
-          if (chartImage != null) {
-            final exchangeName = switch (exchangeType) {
-              ExchangeType.binanceFutures => 'Binance(F)',
-              ExchangeType.okx => 'OKX',
-              ExchangeType.huobi => 'Huobi',
-            };
+            if (chartImage != null) {
+              final exchangeName = switch (exchangeType) {
+                ExchangeType.binanceFutures => 'Binance(F)',
+                ExchangeType.okx => 'OKX',
+                ExchangeType.huobi => 'Huobi',
+              };
 
-            _sendTelegramNotification(
-              symbol,
-              currentPrice,
-              changePercent,
-              timeDifferenceMessage,
-              currentPrice,
-              exchangeName,
-              chartImage,
-              volatility: _volatilityMap[symbol],
-            );
+              _sendTelegramNotification(
+                symbol,
+                currentPrice,
+                changePercent,
+                timeDifferenceMessage,
+                currentPrice,
+                exchangeName,
+                chartImage,
+                volatility: _volatilityMap[symbol],
+                lastCandleAvgPriceChangePercent:
+                    lastCandlePriceChangePercent?.abs(),
+              );
+            }
           }
         }
       }
@@ -641,17 +645,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (!isHide) return;
     List<Map<String, dynamic>> coinsList;
 
-    switch (exchangeType) {
-      case ExchangeType.binanceFutures:
-        coinsList = _coinsListBinanceFeature;
-        break;
-      case ExchangeType.okx:
-        coinsList = coinsListOKX;
-        break;
-      case ExchangeType.huobi:
-        coinsList = coinsListHuobi;
-        break;
-    }
+    coinsList = switch (exchangeType) {
+      ExchangeType.binanceFutures => _coinsListBinanceFeature,
+      ExchangeType.okx => coinsListOKX,
+      ExchangeType.huobi => coinsListHuobi,
+    };
 
     final existingCoinIndex =
         coinsList.indexWhere((coin) => coin['symbol'] == symbol);
@@ -680,59 +678,45 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<List<ChartModel>?> _fetchHistoricalData(String symbol) async {
-    int limit = 55;
-
-    setState(() {});
-
+    int limit = 45;
+    // Попытка запроса к Binance
     try {
       final binanceResponse = await http.get(Uri.parse(
           'https://fapi.binance.com/fapi/v1/klines?symbol=$symbol&interval=5m&limit=$limit'));
 
       if (binanceResponse.statusCode == 200) {
         final data = json.decode(binanceResponse.body) as List;
-        setState(() =>
-            itemChart = data.map((item) => ChartModel.fromJson(item)).toList());
-        return itemChart;
+        return data.map((item) => ChartModel.fromJson(item)).toList();
       } else {
         print('Binance API failed. Status code: ${binanceResponse.statusCode}');
-        return await _fetchFromHuobi(symbol, limit);
+        return _fetchFromBybit(symbol, limit); // Падаем на Bybit при неуспехе
       }
     } catch (e) {
       print('Error fetching from Binance: $e');
-      return await _fetchFromHuobi(symbol, limit);
+      return _fetchFromBybit(symbol, limit); // Падаем на Bybit при ошибке
     }
   }
 
-  Future<List<ChartModel>?> _fetchFromHuobi(String symbol, int limit) async {
+  Future<List<ChartModel>?> _fetchFromBybit(String symbol, int limit) async {
     try {
-      final huobiSymbol = symbol.toLowerCase();
-      final huobiResponse = await http.get(Uri.parse(
-          'https://api.huobi.pro/market/history/kline?period=5min&size=$limit&symbol=$huobiSymbol'));
-
-      if (huobiResponse.statusCode == 200) {
-        final data = json.decode(huobiResponse.body);
-        if (data['status'] == 'ok') {
-          final klineData = data['data'] as List;
-          setState(() => itemChart = klineData
-              .map((item) => ChartModel(
-                    time: item['id'].toDouble(),
-                    open: item['open'].toDouble(),
-                    high: item['high'].toDouble(),
-                    low: item['low'].toDouble(),
-                    close: item['close'].toDouble(),
-                  ))
-              .toList());
-          return itemChart;
+      final bybitResponse = await http.get(Uri.parse(
+          'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=5&limit=$limit'));
+      if (bybitResponse.statusCode == 200) {
+        final jsonData = json.decode(bybitResponse.body);
+        // Check if 'result' and 'list' exist and are valid
+        if (jsonData['result'] != null && jsonData['result']['list'] != null) {
+          final data = jsonData['result']['list'] as List;
+          return data.map((item) => ChartModel.fromJson(item)).toList();
         } else {
-          print('Huobi API error: ${data['err-msg']}');
+          print('Bybit API response missing "result" or "list" fields');
           return null;
         }
       } else {
-        print('Huobi API failed. Status code: ${huobiResponse.statusCode}');
+        print('Bybit API failed. Status code: ${bybitResponse.statusCode}');
         return null;
       }
     } catch (e) {
-      print('Error fetching from Huobi: $e');
+      print('Error fetching from Bybit: $e');
       return null;
     }
   }
@@ -756,6 +740,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     String exchange,
     Uint8List? chartImage, {
     double? volatility,
+    double? lastCandleAvgPriceChangePercent,
   }) async {
     final String direction = changePercent > 0 ? '📈' : '📉';
     final String binanceUrl =
@@ -768,6 +753,7 @@ $direction *$symbol ($exchange)* $direction
 🔹 *Change:* ${changePercent.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
 🔹 *Volatility:* ${volatility?.toStringAsFixed(2) ?? 'N/A'}%
+🔹 *Last Candle Change:* ${lastCandleAvgPriceChangePercent?.toStringAsFixed(2) ?? 'N/A'}%
 🔹 *Platform:* $isPlatform
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
@@ -807,8 +793,8 @@ $direction *$symbol ($exchange)* $direction
       }
 
       if (response.statusCode == 200) {
-        print(
-            "Telegram notification ${chartImage != null ? 'with chart' : 'without chart'} sent successfully!");
+        // print(
+        //     "Telegram notification ${chartImage != null ? 'with chart' : 'without chart'} sent successfully!");
       } else {
         print("Failed to send notification to Telegram."
             "Status code: ${response.statusCode}. "
@@ -849,7 +835,8 @@ $direction *$symbol ($exchange)* $direction
   Widget build(BuildContext context) {
     final filteredCoinsBinance = _coinsListBinanceFeature
         .where((coin) => selectedCoins.contains(coin['symbol']))
-        .toList()..sort((a, b) => b['price'].compareTo(a['price']));
+        .toList()
+      ..sort((a, b) => b['price'].compareTo(a['price']));
 
     final filteredCoinsOKX = coinsListOKX
         .where((coin) => selectedCoins.contains(coin['symbol']))
@@ -934,7 +921,7 @@ $direction *$symbol ($exchange)* $direction
                       coinsListOKX = [];
                       coinsListHuobi = [];
                       coinsListForSelect = [];
-                      itemChart = [];
+                      itemChartMain = [];
                       setState(() {});
                       _fetchCoinData();
                       _loadPriceChangeThreshold();
@@ -970,7 +957,7 @@ $direction *$symbol ($exchange)* $direction
                       CandleSeries<ChartModel, int>(
                         enableSolidCandles: true,
                         enableTooltip: true,
-                        dataSource: itemChart ?? [],
+                        dataSource: itemChartMain ?? [],
                         xValueMapper: (ChartModel sales, _) => sales.time,
                         lowValueMapper: (ChartModel sales, _) => sales.low,
                         highValueMapper: (ChartModel sales, _) => sales.high,
