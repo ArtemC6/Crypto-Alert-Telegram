@@ -250,38 +250,4 @@ const lowVolatilityCrypto = [
 ];
 const telegramBotToken = '8117770504:AAEOirevwh7Lj3xASFm3y0dqwK1QE9C1_VU';
 const chatId = '1288898832';
-
-const timeFrames = [
-  Duration(seconds: 0),
-  Duration(seconds: 1),
-  Duration(seconds: 2),
-  Duration(seconds: 3),
-  Duration(seconds: 4),
-  Duration(seconds: 5),
-  Duration(seconds: 6),
-  Duration(seconds: 7),
-  Duration(seconds: 8),
-  Duration(seconds: 9),
-  Duration(seconds: 10),
-  Duration(seconds: 11),
-  Duration(seconds: 12),
-  Duration(seconds: 13),
-  Duration(seconds: 14),
-  Duration(seconds: 15),
-  Duration(seconds: 20),
-  Duration(seconds: 25),
-  Duration(seconds: 30),
-  Duration(seconds: 35),
-  Duration(seconds: 35),
-  Duration(seconds: 40),
-  Duration(seconds: 45),
-  Duration(seconds: 50),
-  Duration(seconds: 55),
-  Duration(minutes: 1),
-  Duration(minutes: 2),
-  Duration(minutes: 3),
-  Duration(minutes: 4),
-  Duration(minutes: 5),
-];
-
-
+const maxTimeFrame = Duration(minutes: 6);

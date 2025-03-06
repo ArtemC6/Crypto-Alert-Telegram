@@ -5,7 +5,6 @@ import 'dart:math';
 import 'dart:io'; // Добавлен для GZipCodec
 
 import 'package:binanse_notification/Screens/select_token.dart';
-import 'package:binanse_notification/Screens/twitter_monitor_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -21,7 +20,7 @@ import '../services/storage.dart';
 import '../utils.dart';
 import 'package:audioplayers/audioplayers.dart';
 
-enum ExchangeType { binanceFutures, okx, huobi }
+enum ExchangeType { binanceFutures, deribit, huobi }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -31,10 +30,10 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceFeatured, _okxChannelOne, _huobiChannel;
+  WebSocketChannel? _channelSpotBinanceFeatured, _deribitChannel, _huobiChannel;
 
   late List<Map<String, dynamic>> _coinsListBinanceFeature,
-      coinsListOKX,
+      coinsListDeribit,
       coinsListHuobi;
   late List<Map<String, dynamic>> coinsListForSelect;
 
@@ -43,16 +42,17 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool isHide = true;
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
-  final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryDeribit = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryHuobi = {};
   final Map<String, double> _volatilityMap = {};
-  final Map<String, Map<Duration, DateTime>> _lastNotificationTimesAll = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChartMain;
-  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
+  DateTime? _lastMessageTimeBinance,
+      _lastMessageTimeDeribit,
+      _lastMessageTimeHuobi;
   bool _isMonitoringBinance = false,
-      _isMonitoringOKX = false,
+      _isMonitoringDeribit = false,
       _isMonitoringHuobi = false;
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -62,7 +62,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     super.initState();
     _storageService = StorageService();
     _coinsListBinanceFeature = [];
-    coinsListOKX = [];
+    coinsListDeribit = [];
     coinsListHuobi = [];
     coinsListForSelect = [];
     itemChartMain = [];
@@ -84,18 +84,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _isMonitoringBinance = false;
   }
 
-  Future<void> _monitorOKXConnection() async {
-    _isMonitoringOKX = true;
-    while (_isMonitoringOKX) {
+  Future<void> _monitorDeribitConnection() async {
+    _isMonitoringDeribit = true;
+    while (_isMonitoringDeribit) {
       await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeOKX != null &&
-          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
-        print('No data received from OKX for 30 seconds. Reconnecting...');
-        await _connectWebSocketOKX();
+      if (_lastMessageTimeDeribit != null &&
+          DateTime.now().difference(_lastMessageTimeDeribit!).inSeconds >= 30) {
+        print('No data received from Deribit for 30 seconds. Reconnecting...');
+        await _connectWebSocketDeribit();
         break;
       }
     }
-    _isMonitoringOKX = false;
+    _isMonitoringDeribit = false;
   }
 
   Future<void> _monitorHuobiConnection() async {
@@ -181,7 +181,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     // selectedCoins = await _storageService.loadSelectedCoins();
 
     _connectWebSocketBinance();
-    // _connectWebSocketOKX();
+    // _connectWebSocketDeribit();
     _connectWebSocketHuobi();
   }
 
@@ -189,7 +189,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     selectedCoins = selectedCoins.toSet().toList();
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
-    _connectWebSocketOKX();
+    _connectWebSocketDeribit();
     _connectWebSocketHuobi();
   }
 
@@ -197,7 +197,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     await _storageService.deleteCoins();
     setState(() => selectedCoins = []);
     _connectWebSocketBinance();
-    _connectWebSocketOKX();
+    // _connectWebSocketDeribit();
     _connectWebSocketHuobi();
   }
 
@@ -230,42 +230,43 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _connectWebSocketOKX() async {
+  Future<void> _connectWebSocketDeribit() async {
     if (selectedCoins.isEmpty) {
-      await _okxChannelOne?.sink.close();
+      await _deribitChannel?.sink.close();
       return;
     }
 
-    await _okxChannelOne?.sink.close();
+    await _deribitChannel?.sink.close();
 
-    final validCoins = selectedCoins
-        .where((coin) => coin.endsWith("USDT"))
-        .map((coin) => coin.replaceAll("USDT", "-USDT"))
-        .toList();
+    _deribitChannel = WebSocketChannel.connect(
+      Uri.parse('wss://www.deribit.com/ws/api/v2'),
+    );
 
-    _okxChannelOne = WebSocketChannel.connect(
-        Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
+    final subscription = {
+      "jsonrpc": "2.0",
+      "method": "public/subscribe",
+      "params": {
+        "channels":
+            selectedCoins.take(19).map((coin) => "ticker.$coin.raw").toList(),
+      },
+      "id": 1
+    };
 
-    _okxChannelOne!.sink.add(jsonEncode({
-      "op": "subscribe",
-      "args": validCoins
-          .map((symbol) => {"channel": "tickers", "instId": symbol})
-          .toList()
-    }));
+    _deribitChannel!.sink.add(jsonEncode(subscription));
 
-    _okxChannelOne!.stream.listen(
-      _processMessageOKX,
+    _deribitChannel!.stream.listen(
+      _processMessageDeribit,
       onDone: () =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX),
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketDeribit),
       onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX),
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketDeribit),
       cancelOnError: true,
     );
 
-    _lastMessageTimeOKX = DateTime.now();
+    _lastMessageTimeDeribit = DateTime.now();
 
-    if (!_isMonitoringOKX) {
-      _monitorOKXConnection();
+    if (!_isMonitoringDeribit) {
+      _monitorDeribitConnection();
     }
   }
 
@@ -330,22 +331,21 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _updateCoinsList(symbol, price, ExchangeType.binanceFutures);
   }
 
-  void _processMessageOKX(dynamic message) {
+  void _processMessageDeribit(dynamic message) {
     final data = json.decode(message);
-    if (data is! Map<String, dynamic> ||
-        data['arg'] == null ||
-        data['data'] == null) {
-      return;
-    }
+    print(data);
+    if (data['params'] == null || data['params']['data'] == null) return;
 
-    final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
-    final price = double.parse(data['data'][0]['last']);
-    final timestamp = DateTime.now();
+    final tickerData = data['params']['data'];
+    final symbol = tickerData['instrument_name'];
+    final price = tickerData['last_price']?.toDouble() ?? 0.0;
+    final timestamp =
+        DateTime.fromMillisecondsSinceEpoch(tickerData['timestamp']);
 
-    _lastMessageTimeOKX = timestamp;
-    _storePrice(symbol, price, timestamp, ExchangeType.okx);
-    _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
-    _updateCoinsList(symbol, price, ExchangeType.okx);
+    _lastMessageTimeDeribit = timestamp;
+    _storePrice(symbol, price, timestamp, ExchangeType.deribit);
+    _checkPriceChange(symbol, price, timestamp, ExchangeType.deribit);
+    _updateCoinsList(symbol, price, ExchangeType.deribit);
   }
 
   void _processMessageHuobi(dynamic message) {
@@ -400,13 +400,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       ExchangeType exchangeType) {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance,
-      ExchangeType.okx => _priceHistoryOKX,
+      ExchangeType.deribit => _priceHistoryDeribit,
       ExchangeType.huobi => _priceHistoryHuobi,
     };
 
     final coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
-      ExchangeType.okx => coinsListOKX,
+      ExchangeType.deribit => coinsListDeribit,
       ExchangeType.huobi => coinsListHuobi,
     };
 
@@ -415,55 +415,45 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     priceHistory.add({'price': price, 'timestamp': timestamp});
 
-    if (priceHistory.length > 500) {
-      priceHistory.removeAt(0);
-    } else {
-      priceHistory.removeWhere((entry) =>
-          timestamp.difference(entry['timestamp']).inMinutes >=
-          Duration(minutes: 6).inMinutes);
+    priceHistory.removeWhere((entry) =>
+    timestamp.difference(entry['timestamp']).inSeconds >= 6 * 60);
+
+    if (priceHistory.length > 2500) {
+      priceHistory.removeRange(0, priceHistory.length - 2500);
     }
 
     if (isHide && priceHistory.length > 1) {
       final previousPrice = priceHistory[priceHistory.length - 2]['price'];
       final changePercentage = ((price - previousPrice) / previousPrice) * 100;
-      final coinIndex =
-          coinsList.indexWhere((coin) => coin['symbol'] == symbol);
+      final coinIndex = coinsList.indexWhere((coin) => coin['symbol'] == symbol);
 
       if (coinIndex != -1) {
-        // final now = DateTime.now();
-        // if (now.difference(_lastUpdateTime).inMilliseconds >= 1000) {
         setState(
-            () => coinsList[coinIndex]['changePercentage'] = changePercentage);
-        // _lastUpdateTime = now;
-        // }
+                () => coinsList[coinIndex]['changePercentage'] = changePercentage);
       }
     }
   }
 
   void _checkPriceChange(String symbol, double currentPrice, DateTime timestamp,
       ExchangeType exchangeType) {
-    for (final timeFrame in timeFrames) {
-      _checkTimeFrame(symbol, currentPrice, timestamp, timeFrame, exchangeType);
-    }
+    _checkTimeFrame(symbol, currentPrice, timestamp, exchangeType);
   }
 
   Future<void> _checkTimeFrame(String symbol, double currentPrice,
-      DateTime timestamp, Duration timeFrame, ExchangeType exchangeType) async {
+      DateTime timestamp, ExchangeType exchangeType) async {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
-      ExchangeType.okx => _priceHistoryOKX[symbol],
+      ExchangeType.deribit => _priceHistoryDeribit[symbol],
       ExchangeType.huobi => _priceHistoryHuobi[symbol],
     };
 
     if (history == null || history.isEmpty) return;
 
-    final cutoffTime = timestamp.subtract(timeFrame);
+    final cutoffTime = timestamp.subtract(maxTimeFrame);
     final oldPriceData = history.lastWhere(
       (entry) => entry['timestamp'].isBefore(cutoffTime),
-      orElse: () => {},
+      orElse: () => history.first,
     );
-
-    if (oldPriceData.isEmpty) return;
 
     final oldPrice = oldPriceData['price'];
     final changePercent = ((currentPrice - oldPrice) / oldPrice) * 100;
@@ -477,157 +467,152 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       adjustedThreshold = baseThreshold * 0.70;
     }
 
-    if (changePercent.abs() >= adjustedThreshold) {
-      final lastNotificationTime =
-          _lastNotificationTimesAll[symbol]?[timeFrame];
-      final lastNotificationTimeForSymbol = _lastNotificationTimes[symbol];
+    final timeDifference = timestamp.difference(oldPriceData['timestamp']);
+    final isWithinTimeRange =
+        timeDifference.inSeconds >= 0 && timeDifference.inMinutes <= 5;
 
-      if (lastNotificationTimeForSymbol == null ||
-          timestamp.difference(lastNotificationTimeForSymbol) >=
-              Duration(seconds: 200)) {
-        if (lastNotificationTime == null ||
-            timestamp.difference(lastNotificationTime) >= timeFrame) {
-          final timeDifferenceMessage =
-              _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
+    if (changePercent.abs() >= adjustedThreshold && isWithinTimeRange) {
+      final lastNotificationTime = _lastNotificationTimes[symbol];
 
-          _lastNotificationTimesAll.putIfAbsent(symbol, () => {});
-          _lastNotificationTimesAll[symbol]![timeFrame] = timestamp;
-          _lastNotificationTimes[symbol] = timestamp;
-          history.remove(oldPriceData);
+      if (lastNotificationTime == null ||
+          timestamp.difference(lastNotificationTime) >=
+              Duration(seconds: 100)) {
+        final timeDifferenceMessage =
+            _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
-          final itemChart = await _fetchHistoricalData(symbol);
-          final chartKey = GlobalKey();
-          Uint8List? chartImage;
+        _lastNotificationTimes[symbol] = timestamp;
 
-          double? lastCandleAddPercent;
-          double? lastCandlePriceChangePercent;
-          bool isLastCandleAdd = false;
-          if (itemChart != null && itemChart.length >= 2) {
-            final lastCandle = itemChart.last;
-            final prevCandle = itemChart[itemChart.length - 2];
-            lastCandlePriceChangePercent =
-                ((lastCandle.close! - prevCandle.close!) / prevCandle.close!) *
-                    100.abs();
+        final itemChart = await _fetchHistoricalData(symbol);
+        final chartKey = GlobalKey();
+        Uint8List? chartImage;
 
-            lastCandleAddPercent = lastCandlePriceChangePercent +
-                (lastCandlePriceChangePercent * 0.425);
-            isLastCandleAdd = lastCandleAddPercent.abs() >= changePercent.abs();
-          }
+        double? lastCandleAddPercent;
+        double? lastCandlePriceChangePercent;
+        bool isLastCandleAdd = false;
 
-          if (isLastCandleAdd) {
-            if (itemChart != null && itemChart.isNotEmpty) {
-              print(symbol);
-              AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+        if (itemChart != null && itemChart.length >= 2) {
+          final lastCandle = itemChart.last;
+          final prevCandle = itemChart[itemChart.length - 2];
+          lastCandlePriceChangePercent =
+              ((lastCandle.close! - prevCandle.close!) / prevCandle.close!) *
+                  100.abs();
 
-              setState(() => itemChartMain = itemChart);
-              while (Navigator.of(context).canPop()) {
-                await SchedulerBinding.instance.endOfFrame;
-                await Future.delayed(Duration(milliseconds: 20));
-              }
+          lastCandleAddPercent = lastCandlePriceChangePercent +
+              (lastCandlePriceChangePercent * 0.4);
+          isLastCandleAdd = lastCandleAddPercent.abs() >= changePercent.abs();
+        }
 
-              await showDialog(
-                context: context,
-                barrierColor: Colors.transparent,
-                builder: (context) {
-                  final height = MediaQuery.of(context).size.height;
+        if (isLastCandleAdd) {
+          if (itemChart != null && itemChart.isNotEmpty) {
+            print(symbol);
+            AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
 
-                  Future.delayed(Duration(milliseconds: 100), () async {
-                    if (mounted && Navigator.canPop(context)) {
-                      Navigator.pop(context);
-                    }
-                  });
+            setState(() => itemChartMain = itemChart);
+            while (Navigator.of(context).canPop()) {
+              await SchedulerBinding.instance.endOfFrame;
+              await Future.delayed(Duration(milliseconds: 20));
+            }
 
-                  return Dialog(
-                    insetPadding: EdgeInsets.only(
-                      left: 0,
-                      right: 0,
-                      bottom: height * 0.15,
-                      top: height * 0.15,
-                    ),
-                    child: Scaffold(
-                      backgroundColor: Colors.transparent,
-                      body: SizedBox(
-                        width: MediaQuery.of(context).size.width,
-                        height: MediaQuery.of(context).size.height,
-                        child: RepaintBoundary(
-                          key: chartKey,
-                          child: SfCartesianChart(
-                            backgroundColor: Colors.black,
-                            title: ChartTitle(
-                                text:
-                                    '   $symbol  $timeDifferenceMessage  ${changePercent.abs().toStringAsFixed(2)}%',
-                                textStyle: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                alignment: ChartAlignment.center,
-                                borderWidth: 2.5),
-                            trackballBehavior: TrackballBehavior(
-                              enable: true,
-                              activationMode: ActivationMode.singleTap,
-                              tooltipAlignment: ChartAlignment.near,
-                            ),
-                            primaryXAxis: NumericAxis(isVisible: false),
-                            zoomPanBehavior: ZoomPanBehavior(
-                              enablePinching: true,
-                              zoomMode: ZoomMode.xy,
-                              selectionRectBorderWidth: 10,
-                              enablePanning: true,
-                              enableDoubleTapZooming: true,
-                              enableMouseWheelZooming: true,
-                              enableSelectionZooming: true,
-                            ),
-                            series: <CandleSeries>[
-                              CandleSeries<ChartModel, int>(
-                                enableSolidCandles: true,
-                                enableTooltip: true,
-                                dataSource: itemChartMain ?? [],
-                                // Используем itemChartMain вместо itemChart
-                                xValueMapper: (ChartModel sales, _) =>
-                                    sales.time,
-                                lowValueMapper: (ChartModel sales, _) =>
-                                    sales.low,
-                                highValueMapper: (ChartModel sales, _) =>
-                                    sales.high,
-                                openValueMapper: (ChartModel sales, _) =>
-                                    sales.open,
-                                closeValueMapper: (ChartModel sales, _) =>
-                                    sales.close,
-                                animationDuration: 0,
-                              )
-                            ],
+            await showDialog(
+              context: context,
+              barrierColor: Colors.transparent,
+              builder: (context) {
+                final height = MediaQuery.of(context).size.height;
+
+                Future.delayed(Duration(milliseconds: 100), () async {
+                  if (mounted && Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  }
+                });
+
+                return Dialog(
+                  insetPadding: EdgeInsets.only(
+                    left: 0,
+                    right: 0,
+                    bottom: height * 0.15,
+                    top: height * 0.15,
+                  ),
+                  child: Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      height: MediaQuery.of(context).size.height,
+                      child: RepaintBoundary(
+                        key: chartKey,
+                        child: SfCartesianChart(
+                          backgroundColor: Colors.black,
+                          title: ChartTitle(
+                              text:
+                                  '   $symbol  $timeDifferenceMessage  ${changePercent.abs().toStringAsFixed(2)}%',
+                              textStyle: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              alignment: ChartAlignment.center,
+                              borderWidth: 2.5),
+                          trackballBehavior: TrackballBehavior(
+                            enable: true,
+                            activationMode: ActivationMode.singleTap,
+                            tooltipAlignment: ChartAlignment.near,
                           ),
+                          primaryXAxis: NumericAxis(isVisible: false),
+                          zoomPanBehavior: ZoomPanBehavior(
+                            enablePinching: true,
+                            zoomMode: ZoomMode.xy,
+                            selectionRectBorderWidth: 10,
+                            enablePanning: true,
+                            enableDoubleTapZooming: true,
+                            enableMouseWheelZooming: true,
+                            enableSelectionZooming: true,
+                          ),
+                          series: <CandleSeries>[
+                            CandleSeries<ChartModel, int>(
+                              enableSolidCandles: true,
+                              enableTooltip: true,
+                              dataSource: itemChartMain ?? [],
+                              xValueMapper: (ChartModel sales, _) => sales.time,
+                              lowValueMapper: (ChartModel sales, _) =>
+                                  sales.low,
+                              highValueMapper: (ChartModel sales, _) =>
+                                  sales.high,
+                              openValueMapper: (ChartModel sales, _) =>
+                                  sales.open,
+                              closeValueMapper: (ChartModel sales, _) =>
+                                  sales.close,
+                              animationDuration: 0,
+                            )
+                          ],
                         ),
                       ),
                     ),
-                  );
-                },
-              );
+                  ),
+                );
+              },
+            );
 
-              chartImage = await captureChart(chartKey);
-            }
+            chartImage = await captureChart(chartKey);
+          }
 
-            if (chartImage != null) {
-              final exchangeName = switch (exchangeType) {
-                ExchangeType.binanceFutures => 'Binance',
-                ExchangeType.okx => 'OKX',
-                ExchangeType.huobi => 'Huobi',
-              };
+          if (chartImage != null) {
+            final exchangeName = switch (exchangeType) {
+              ExchangeType.binanceFutures => 'Binance',
+              ExchangeType.deribit => 'Deribit',
+              ExchangeType.huobi => 'Huobi',
+            };
 
-              _sendTelegramNotification(
-                symbol,
-                currentPrice,
-                changePercent,
-                timeDifferenceMessage,
-                currentPrice,
-                exchangeName,
-                chartImage,
-                volatility: _volatilityMap[symbol],
-                lastCandleAvgPriceChangePercent:
-                    lastCandlePriceChangePercent?.abs(),
-              );
-            }
+            _sendTelegramNotification(
+              symbol,
+              currentPrice,
+              changePercent,
+              timeDifferenceMessage,
+              currentPrice,
+              exchangeName,
+              chartImage,
+              volatility: _volatilityMap[symbol],
+              lastCandleAvgPriceChangePercent:
+                  lastCandlePriceChangePercent?.abs(),
+            );
           }
         }
       }
@@ -641,7 +626,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
-      ExchangeType.okx => coinsListOKX,
+      ExchangeType.deribit => coinsListDeribit,
       ExchangeType.huobi => coinsListHuobi,
     };
 
@@ -673,7 +658,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<List<ChartModel>?> _fetchHistoricalData(String symbol) async {
     int limit = 60;
-    // Попытка запроса к Binance
     try {
       final binanceResponse = await http.get(Uri.parse(
           'https://fapi.binance.com/fapi/v1/klines?symbol=$symbol&interval=5m&limit=$limit'));
@@ -682,12 +666,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final data = json.decode(binanceResponse.body) as List;
         return data.map((item) => ChartModel.fromJson(item)).toList();
       } else {
-        // print('Binance API failed. Status code: ${binanceResponse.statusCode}');
-        return _fetchFromBybit(symbol, limit); // Падаем на Bybit при неуспехе
+        return _fetchFromBybit(symbol, limit);
       }
     } catch (e) {
       print('Error fetching from Binance: $e');
-      return _fetchFromBybit(symbol, limit); // Падаем на Bybit при ошибке
+      return _fetchFromBybit(symbol, limit);
     }
   }
 
@@ -784,8 +767,6 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
       }
 
       if (response.statusCode == 200) {
-        // print(
-        //     "Telegram notification ${chartImage != null ? 'with chart' : 'without chart'} sent successfully!");
       } else {
         print("Failed to send notification to Telegram."
             "Status code: ${response.statusCode}. "
@@ -829,7 +810,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
 
-    final filteredCoinsOKX = coinsListOKX
+    final filteredCoinsDeribit = coinsListDeribit
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
@@ -885,12 +866,12 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                               setState(() => isHide = !isHide);
 
                               filteredCoinsBinance.clear();
-                              filteredCoinsOKX.clear();
+                              filteredCoinsDeribit.clear();
                               filteredCoinsHuobi.clear();
                             },
                             child: Text(!isHide
-                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
-                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'),
+                                ? 'F ${filteredCoinsBinance.length} : D ${filteredCoinsDeribit.length} : H ${filteredCoinsHuobi.length}'
+                                : 'F ${filteredCoinsBinance.length} : D ${filteredCoinsDeribit.length} : H ${filteredCoinsHuobi.length}'),
                           ),
                         ),
                       ],
@@ -909,7 +890,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                   ElevatedButton(
                     onPressed: () async {
                       _coinsListBinanceFeature = [];
-                      coinsListOKX = [];
+                      coinsListDeribit = [];
                       coinsListHuobi = [];
                       coinsListForSelect = [];
                       itemChartMain = [];
@@ -990,11 +971,11 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
             if (isHide)
               Expanded(
                 child: ListView.builder(
-                  itemCount: filteredCoinsOKX.length,
+                  itemCount: filteredCoinsDeribit.length,
                   itemBuilder: (context, index) {
-                    final coin = filteredCoinsOKX[index];
+                    final coin = filteredCoinsDeribit[index];
                     return ListTile(
-                      title: Text('(OKX) ${coin['symbol']}'),
+                      title: Text('(Deribit) ${coin['symbol']}'),
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(
