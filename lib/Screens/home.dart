@@ -54,7 +54,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool _isMonitoringBinance = false,
       _isMonitoringOKX = false,
       _isMonitoringHuobi = false;
-
   bool isRefresh = true;
   final _chartKey = GlobalKey();
 
@@ -182,7 +181,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     // selectedCoins = await _storageService.loadSelectedCoins();
 
     _connectWebSocketBinance();
-    _connectWebSocketOKX();
+    // _connectWebSocketOKX();
     _connectWebSocketHuobi();
   }
 
@@ -397,23 +396,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  double _calculateVolatility(String symbol, ExchangeType exchangeType) {
-    final history = switch (exchangeType) {
-      ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
-      ExchangeType.okx => _priceHistoryOKX[symbol],
-      ExchangeType.huobi => _priceHistoryHuobi[symbol],
-    };
-
-    if (history == null || history.length < 10) return 0.0;
-
-    final prices = history.map((e) => e['price'] as double).toList();
-    final mean = prices.reduce((a, b) => a + b) / prices.length;
-    final variance =
-        prices.map((p) => pow(p - mean, 2)).reduce((a, b) => a + b) /
-            prices.length;
-    return sqrt(variance);
-  }
-
   void _storePrice(String symbol, double price, DateTime timestamp,
       ExchangeType exchangeType) {
     final history = switch (exchangeType) {
@@ -441,8 +423,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           Duration(minutes: 6).inMinutes);
     }
 
-    _volatilityMap[symbol] = _calculateVolatility(symbol, exchangeType);
-
     if (isHide && priceHistory.length > 1) {
       final previousPrice = priceHistory[priceHistory.length - 2]['price'];
       final changePercentage = ((price - previousPrice) / previousPrice) * 100;
@@ -450,8 +430,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           coinsList.indexWhere((coin) => coin['symbol'] == symbol);
 
       if (coinIndex != -1) {
+        // final now = DateTime.now();
+        // if (now.difference(_lastUpdateTime).inMilliseconds >= 1000) {
         setState(
             () => coinsList[coinIndex]['changePercentage'] = changePercentage);
+        // _lastUpdateTime = now;
+        // }
       }
     }
   }
@@ -526,13 +510,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                     100.abs();
 
             lastCandleAddPercent = lastCandlePriceChangePercent +
-                (lastCandlePriceChangePercent * 0.4);
+                (lastCandlePriceChangePercent * 0.425);
             isLastCandleAdd = lastCandleAddPercent.abs() >= changePercent.abs();
           }
 
           if (isLastCandleAdd) {
             if (itemChart != null && itemChart.isNotEmpty) {
-              print('\n' * 100);
               print(symbol);
               AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
 
@@ -570,6 +553,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                           key: chartKey,
                           child: SfCartesianChart(
                             backgroundColor: Colors.black,
+                            title: ChartTitle(
+                                text:
+                                    '   $symbol  $timeDifferenceMessage  ${changePercent.abs().toStringAsFixed(2)}%',
+                                textStyle: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                alignment: ChartAlignment.center,
+                                borderWidth: 2.5),
                             trackballBehavior: TrackballBehavior(
                               enable: true,
                               activationMode: ActivationMode.singleTap,
@@ -589,7 +582,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                               CandleSeries<ChartModel, int>(
                                 enableSolidCandles: true,
                                 enableTooltip: true,
-                                dataSource: itemChart,
+                                dataSource: itemChartMain ?? [],
+                                // Используем itemChartMain вместо itemChart
                                 xValueMapper: (ChartModel sales, _) =>
                                     sales.time,
                                 lowValueMapper: (ChartModel sales, _) =>
@@ -616,7 +610,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
             if (chartImage != null) {
               final exchangeName = switch (exchangeType) {
-                ExchangeType.binanceFutures => 'Binance(F)',
+                ExchangeType.binanceFutures => 'Binance',
                 ExchangeType.okx => 'OKX',
                 ExchangeType.huobi => 'Huobi',
               };
@@ -678,7 +672,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<List<ChartModel>?> _fetchHistoricalData(String symbol) async {
-    int limit = 45;
+    int limit = 60;
     // Попытка запроса к Binance
     try {
       final binanceResponse = await http.get(Uri.parse(
@@ -688,7 +682,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final data = json.decode(binanceResponse.body) as List;
         return data.map((item) => ChartModel.fromJson(item)).toList();
       } else {
-        print('Binance API failed. Status code: ${binanceResponse.statusCode}');
+        // print('Binance API failed. Status code: ${binanceResponse.statusCode}');
         return _fetchFromBybit(symbol, limit); // Падаем на Bybit при неуспехе
       }
     } catch (e) {
@@ -703,7 +697,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=5&limit=$limit'));
       if (bybitResponse.statusCode == 200) {
         final jsonData = json.decode(bybitResponse.body);
-        // Check if 'result' and 'list' exist and are valid
         if (jsonData['result'] != null && jsonData['result']['list'] != null) {
           final data = jsonData['result']['list'] as List;
           return data.map((item) => ChartModel.fromJson(item)).toList();
@@ -747,14 +740,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
     final String caption = '''
-$direction *$symbol ($exchange)* $direction
+$direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
 
 🔹 *Symbol:* [$symbol]($symbol)
-🔹 *Change:* ${changePercent.abs().toStringAsFixed(1)}%
 🔹 *Timeframe:* $time
-🔹 *Volatility:* ${volatility?.toStringAsFixed(2) ?? 'N/A'}%
-🔹 *Last Candle Change:* ${lastCandleAvgPriceChangePercent?.toStringAsFixed(2) ?? 'N/A'}%
-🔹 *Platform:* $isPlatform
+🔹 *Last Candle * ${lastCandleAvgPriceChangePercent?.toStringAsFixed(2) ?? 'N/A'}%
+🔹 *Platform:* $isPlatform  $exchange 
 🔹 *Binance Link:* [$symbol]($binanceUrl)
 
 💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
