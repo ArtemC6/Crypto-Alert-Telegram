@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
-import 'dart:io'; // Добавлен для GZipCodec
+import 'dart:io';
 
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/cupertino.dart';
@@ -20,7 +20,7 @@ import '../services/storage.dart';
 import '../utils.dart';
 import 'package:audioplayers/audioplayers.dart';
 
-enum ExchangeType { binanceFutures, deribit, huobi }
+enum ExchangeType { binanceFutures, okx, huobi }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -30,10 +30,10 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  WebSocketChannel? _channelSpotBinanceFeatured, _deribitChannel, _huobiChannel;
+  WebSocketChannel? _channelSpotBinanceFeatured, _okxChannel, _huobiChannel;
 
   late List<Map<String, dynamic>> _coinsListBinanceFeature,
-      coinsListDeribit,
+      coinsListOKX,
       coinsListHuobi;
   late List<Map<String, dynamic>> coinsListForSelect;
 
@@ -42,17 +42,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool isHide = true;
   final isPlatform = kIsWeb ? 'Web' : 'Mobile';
   final Map<String, List<Map<String, dynamic>>> _priceHistoryBinance = {};
-  final Map<String, List<Map<String, dynamic>>> _priceHistoryDeribit = {};
+  final Map<String, List<Map<String, dynamic>>> _priceHistoryOKX = {};
   final Map<String, List<Map<String, dynamic>>> _priceHistoryHuobi = {};
   final Map<String, double> _volatilityMap = {};
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChartMain;
-  DateTime? _lastMessageTimeBinance,
-      _lastMessageTimeDeribit,
-      _lastMessageTimeHuobi;
+  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
   bool _isMonitoringBinance = false,
-      _isMonitoringDeribit = false,
+      _isMonitoringOKX = false,
       _isMonitoringHuobi = false;
   bool isRefresh = true;
   final _chartKey = GlobalKey();
@@ -62,7 +60,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     super.initState();
     _storageService = StorageService();
     _coinsListBinanceFeature = [];
-    coinsListDeribit = [];
+    coinsListOKX = [];
     coinsListHuobi = [];
     coinsListForSelect = [];
     itemChartMain = [];
@@ -84,18 +82,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _isMonitoringBinance = false;
   }
 
-  Future<void> _monitorDeribitConnection() async {
-    _isMonitoringDeribit = true;
-    while (_isMonitoringDeribit) {
+  Future<void> _monitorOKXConnection() async {
+    _isMonitoringOKX = true;
+    while (_isMonitoringOKX) {
       await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeDeribit != null &&
-          DateTime.now().difference(_lastMessageTimeDeribit!).inSeconds >= 30) {
-        print('No data received from Deribit for 30 seconds. Reconnecting...');
-        await _connectWebSocketDeribit();
+      if (_lastMessageTimeOKX != null &&
+          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
+        print('No data received from OKX for 30 seconds. Reconnecting...');
+        await _connectWebSocketOKX();
         break;
       }
     }
-    _isMonitoringDeribit = false;
+    _isMonitoringOKX = false;
   }
 
   Future<void> _monitorHuobiConnection() async {
@@ -107,14 +105,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       await Future.delayed(Duration(seconds: 5));
       if (_lastMessageTimeHuobi != null &&
           DateTime.now().difference(_lastMessageTimeHuobi!).inSeconds >= 30) {
-        print(
-            'No data from Huobi for 30 seconds. Attempting reconnect (${reconnectAttempts + 1}/$maxAttempts)...');
         await _huobiChannel?.sink.close();
         await _connectWebSocketHuobi();
 
         reconnectAttempts++;
         if (reconnectAttempts >= maxAttempts) {
-          print('Max reconnection attempts reached for Huobi. Pausing...');
           await Future.delayed(Duration(minutes: 1));
           reconnectAttempts = 0;
         } else {
@@ -130,6 +125,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _fetchCoinData() async {
     try {
+      final spotResponse = await http
+          .get(Uri.parse('https://fapi.binance.com/fapi/v3/exchangeInfo'));
+      if (spotResponse.statusCode == 200) {
+        final exchangeData = json.decode(spotResponse.body);
+        coinsListForSelect.addAll((exchangeData['symbols'] as List)
+            .where((symbol) => symbol['status'] == 'TRADING')
+            .map((symbol) => {'symbol': symbol['symbol']})
+            .toList());
+      }
+
       final binanceResponse = await http
           .get(Uri.parse('https://fapi.binance.com/fapi/v1/exchangeInfo'));
       if (binanceResponse.statusCode == 200) {
@@ -163,8 +168,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         topGainers.sort((a, b) =>
             b['priceChangePercent'].compareTo(a['priceChangePercent']));
 
-        setState(() => selectedCoins
-            .addAll(topGainers.take(24).map((e) => e['symbol'] as String)));
+        setState(() =>
+            selectedCoins.addAll(topGainers.map((e) => e['symbol'] as String)));
       }
 
       _loadSelectedCoins();
@@ -181,7 +186,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     // selectedCoins = await _storageService.loadSelectedCoins();
 
     _connectWebSocketBinance();
-    // _connectWebSocketDeribit();
+    _connectWebSocketOKX();
     _connectWebSocketHuobi();
   }
 
@@ -189,7 +194,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     selectedCoins = selectedCoins.toSet().toList();
     await _storageService.saveSelectedCoins(selectedCoins);
     _connectWebSocketBinance();
-    _connectWebSocketDeribit();
+    _connectWebSocketOKX();
     _connectWebSocketHuobi();
   }
 
@@ -197,7 +202,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     await _storageService.deleteCoins();
     setState(() => selectedCoins = []);
     _connectWebSocketBinance();
-    // _connectWebSocketDeribit();
+    _connectWebSocketOKX();
     _connectWebSocketHuobi();
   }
 
@@ -230,44 +235,40 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _connectWebSocketDeribit() async {
+  Future<void> _connectWebSocketOKX() async {
     if (selectedCoins.isEmpty) {
-      await _deribitChannel?.sink.close();
+      print('No coins selected for OKX');
+      await _okxChannel?.sink.close();
       return;
     }
 
-    await _deribitChannel?.sink.close();
+    await _okxChannel?.sink.close();
 
-    _deribitChannel = WebSocketChannel.connect(
-      Uri.parse('wss://www.deribit.com/ws/api/v2'),
-    );
+    final validCoins = selectedCoins
+        .where((coin) => coin.endsWith("USDT"))
+        .map((coin) => coin.replaceAll("USDT", "-USDT"))
+        .toList();
 
-    final subscription = {
-      "jsonrpc": "2.0",
-      "method": "public/subscribe",
-      "params": {
-        "channels":
-            selectedCoins.take(19).map((coin) => "ticker.$coin.raw").toList(),
+    _okxChannel = WebSocketChannel.connect(
+        Uri.parse('wss://ws.okx.com:8443/ws/v5/public'));
+
+    _okxChannel!.sink.add(jsonEncode({
+      "op": "subscribe",
+      "args": validCoins
+          .map((symbol) => {"channel": "tickers", "instId": symbol})
+          .toList()
+    }));
+
+    _okxChannel!.stream.listen(
+      _processMessageOKX,
+      onDone: () {
+        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
       },
-      "id": 1
-    };
-
-    _deribitChannel!.sink.add(jsonEncode(subscription));
-
-    _deribitChannel!.stream.listen(
-      _processMessageDeribit,
-      onDone: () =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketDeribit),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketDeribit),
+      onError: (error) {
+        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
+      },
       cancelOnError: true,
     );
-
-    _lastMessageTimeDeribit = DateTime.now();
-
-    if (!_isMonitoringDeribit) {
-      _monitorDeribitConnection();
-    }
   }
 
   Future<void> _connectWebSocketHuobi() async {
@@ -300,7 +301,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
         },
         onError: (error) {
-          print('Huobi WebSocket error: $error');
           Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
         },
         cancelOnError: false,
@@ -312,7 +312,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         _monitorHuobiConnection();
       }
     } catch (e) {
-      print('Failed to connect to Huobi WebSocket: $e');
       Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
     }
   }
@@ -331,21 +330,22 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _updateCoinsList(symbol, price, ExchangeType.binanceFutures);
   }
 
-  void _processMessageDeribit(dynamic message) {
+  void _processMessageOKX(dynamic message) {
     final data = json.decode(message);
-    print(data);
-    if (data['params'] == null || data['params']['data'] == null) return;
+    if (data is! Map<String, dynamic> ||
+        data['arg'] == null ||
+        data['data'] == null) {
+      return;
+    }
 
-    final tickerData = data['params']['data'];
-    final symbol = tickerData['instrument_name'];
-    final price = tickerData['last_price']?.toDouble() ?? 0.0;
-    final timestamp =
-        DateTime.fromMillisecondsSinceEpoch(tickerData['timestamp']);
+    final symbol = data['arg']['instId'].replaceAll("-USDT", "USDT");
+    final price = double.parse(data['data'][0]['last']);
+    final timestamp = DateTime.now();
 
-    _lastMessageTimeDeribit = timestamp;
-    _storePrice(symbol, price, timestamp, ExchangeType.deribit);
-    _checkPriceChange(symbol, price, timestamp, ExchangeType.deribit);
-    _updateCoinsList(symbol, price, ExchangeType.deribit);
+    _lastMessageTimeOKX = timestamp;
+    _storePrice(symbol, price, timestamp, ExchangeType.okx);
+    _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
+    _updateCoinsList(symbol, price, ExchangeType.okx);
   }
 
   void _processMessageHuobi(dynamic message) {
@@ -357,7 +357,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       } else if (message is String) {
         jsonString = message;
       } else {
-        print('Huobi: Unexpected message type: ${message.runtimeType}');
         return;
       }
 
@@ -392,7 +391,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _checkPriceChange(symbol, price, timestamp, ExchangeType.huobi);
       _updateCoinsList(symbol, price, ExchangeType.huobi);
     } catch (e) {
-      print('Huobi: Error processing message: $e, Message: $message');
     }
   }
 
@@ -400,13 +398,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       ExchangeType exchangeType) {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance,
-      ExchangeType.deribit => _priceHistoryDeribit,
+      ExchangeType.okx => _priceHistoryOKX,
       ExchangeType.huobi => _priceHistoryHuobi,
     };
 
     final coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
-      ExchangeType.deribit => coinsListDeribit,
+      ExchangeType.okx => coinsListOKX,
       ExchangeType.huobi => coinsListHuobi,
     };
 
@@ -416,7 +414,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     priceHistory.add({'price': price, 'timestamp': timestamp});
 
     priceHistory.removeWhere((entry) =>
-    timestamp.difference(entry['timestamp']).inSeconds >= 6 * 60);
+        timestamp.difference(entry['timestamp']).inSeconds >= 6 * 60);
 
     if (priceHistory.length > 2500) {
       priceHistory.removeRange(0, priceHistory.length - 2500);
@@ -425,11 +423,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (isHide && priceHistory.length > 1) {
       final previousPrice = priceHistory[priceHistory.length - 2]['price'];
       final changePercentage = ((price - previousPrice) / previousPrice) * 100;
-      final coinIndex = coinsList.indexWhere((coin) => coin['symbol'] == symbol);
+      final coinIndex =
+          coinsList.indexWhere((coin) => coin['symbol'] == symbol);
 
       if (coinIndex != -1) {
         setState(
-                () => coinsList[coinIndex]['changePercentage'] = changePercentage);
+            () => coinsList[coinIndex]['changePercentage'] = changePercentage);
       }
     }
   }
@@ -443,7 +442,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       DateTime timestamp, ExchangeType exchangeType) async {
     final history = switch (exchangeType) {
       ExchangeType.binanceFutures => _priceHistoryBinance[symbol],
-      ExchangeType.deribit => _priceHistoryDeribit[symbol],
+      ExchangeType.okx => _priceHistoryOKX[symbol],
       ExchangeType.huobi => _priceHistoryHuobi[symbol],
     };
 
@@ -476,7 +475,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
       if (lastNotificationTime == null ||
           timestamp.difference(lastNotificationTime) >=
-              Duration(seconds: 100)) {
+              Duration(seconds: 150)) {
         final timeDifferenceMessage =
             _getTimeDifferenceMessage(timestamp, oldPriceData['timestamp']);
 
@@ -597,7 +596,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           if (chartImage != null) {
             final exchangeName = switch (exchangeType) {
               ExchangeType.binanceFutures => 'Binance',
-              ExchangeType.deribit => 'Deribit',
+              ExchangeType.okx => 'OKX',
               ExchangeType.huobi => 'Huobi',
             };
 
@@ -626,7 +625,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     coinsList = switch (exchangeType) {
       ExchangeType.binanceFutures => _coinsListBinanceFeature,
-      ExchangeType.deribit => coinsListDeribit,
+      ExchangeType.okx => coinsListOKX,
       ExchangeType.huobi => coinsListHuobi,
     };
 
@@ -810,7 +809,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
 
-    final filteredCoinsDeribit = coinsListDeribit
+    final filteredCoinsOKX = coinsListOKX
         .where((coin) => selectedCoins.contains(coin['symbol']))
         .toList()
       ..sort((a, b) => b['price'].compareTo(a['price']));
@@ -866,12 +865,12 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                               setState(() => isHide = !isHide);
 
                               filteredCoinsBinance.clear();
-                              filteredCoinsDeribit.clear();
+                              filteredCoinsOKX.clear();
                               filteredCoinsHuobi.clear();
                             },
                             child: Text(!isHide
-                                ? 'F ${filteredCoinsBinance.length} : D ${filteredCoinsDeribit.length} : H ${filteredCoinsHuobi.length}'
-                                : 'F ${filteredCoinsBinance.length} : D ${filteredCoinsDeribit.length} : H ${filteredCoinsHuobi.length}'),
+                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
+                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'),
                           ),
                         ),
                       ],
@@ -890,7 +889,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                   ElevatedButton(
                     onPressed: () async {
                       _coinsListBinanceFeature = [];
-                      coinsListDeribit = [];
+                      coinsListOKX = [];
                       coinsListHuobi = [];
                       coinsListForSelect = [];
                       itemChartMain = [];
@@ -971,11 +970,11 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
             if (isHide)
               Expanded(
                 child: ListView.builder(
-                  itemCount: filteredCoinsDeribit.length,
+                  itemCount: filteredCoinsOKX.length,
                   itemBuilder: (context, index) {
-                    final coin = filteredCoinsDeribit[index];
+                    final coin = filteredCoinsOKX[index];
                     return ListTile(
-                      title: Text('(Deribit) ${coin['symbol']}'),
+                      title: Text('(OKX) ${coin['symbol']}'),
                       subtitle: Text(
                         'Price: ${coin['price']}',
                         style: TextStyle(
