@@ -390,8 +390,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _storePrice(symbol, price, timestamp, ExchangeType.huobi);
       _checkPriceChange(symbol, price, timestamp, ExchangeType.huobi);
       _updateCoinsList(symbol, price, ExchangeType.huobi);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   void _storePrice(String symbol, double price, DateTime timestamp,
@@ -518,7 +517,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               builder: (context) {
                 final height = MediaQuery.of(context).size.height;
 
-                Future.delayed(Duration(milliseconds: 100), () async {
+                Future.delayed(Duration(milliseconds: 150), () async {
                   if (mounted && Navigator.canPop(context)) {
                     Navigator.pop(context);
                   }
