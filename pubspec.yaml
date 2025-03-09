@@ -47,7 +47,8 @@ dev_dependencies:
   syncfusion_flutter_charts: ^28.2.9
   path_provider:
   permission_handler: ^11.4.0
-  audioplayers: ^6.2.0
+  audioplayers: ^6.3.0
+
 
 # The following section is specific to Flutter packages.
 flutter:
