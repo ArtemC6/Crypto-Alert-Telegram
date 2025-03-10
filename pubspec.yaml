@@ -48,6 +48,7 @@ dev_dependencies:
   path_provider:
   permission_handler: ^11.4.0
   audioplayers: ^6.3.0
+  graphql_flutter: ^5.1.2
 
 
 # The following section is specific to Flutter packages.

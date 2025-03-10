@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:io';
 
+import 'package:binanse_notification/Screens/token_monitor_page.dart';
+import 'package:intl/intl.dart';
+
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +19,8 @@ import 'package:dio/dio.dart';
 
 import '../const.dart';
 import '../model/chart.dart';
+import '../model/token_model.dart';
+import '../services/api.dart';
 import '../services/storage.dart';
 
 import '../utils.dart';
@@ -54,18 +59,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _isMonitoringOKX = false,
       _isMonitoringHuobi = false;
   bool isRefresh = true;
-  final dio = Dio();
 
   final _chartKey = GlobalKey();
 
   List<dynamic> _previousTokens = [];
+  List<dynamic> _saveTokens = [];
   final Set<String> _sentTokens = {};
 
   bool _isTokenSent(String tokenAddress) {
     return _sentTokens.contains(tokenAddress);
   }
 
-  void _startTimer() {
+  Future<void> _startTimer() async {
     Timer.periodic(Duration(seconds: 2), (_) {
       _fetchAndUpdateTokens();
     });
@@ -85,184 +90,45 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _startTimer();
   }
 
-  Future<String> _analyzeTokenWithAIChat(dynamic token) async {
-    if (token == null || token.isEmpty || token.length < 2) return '0';
-    try {
-      const modelUrl =
-          'https://api.deepai.org/api/text-generator'; // URL для DeepAI
-
-      final prompt = '''
-Analyze the next token and determine if it is fraudulent. Specify the probability of fraud (0-100%) only the numbers are correct
-- Symbol: ${token['token']['symbol']}
-- Name: ${token['token']['name']}
-- Address: ${token['token']['address']}
-- Market Cap: ${token['marketCap']}
-- Liquidity: ${token['liquidity']}
-- Holders: ${token['holders']}
-- 24h Volume: ${token['volume24']}
-- 24h Transactions: ${token['txnCount24']}
-- 24h Unique Buys: ${token['uniqueBuys24']}
-- 24h Unique Sells: ${token['uniqueSells24']}
-- Created At: ${token['createdAt']}
-- 24h Price Change: ${token['change24']}
-- 24h High: ${token['high24']}
-- 24h Low: ${token['low24']}
-- Image: ${token['token']['imageThumbUrl']}
-- Description: ${token['token']['description']}
-- Website: ${token['token']['website']}
-''';
-
-      final response = await http.post(
-        Uri.parse(modelUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'Api-Key': 'f47a8884-07e8-4095-af95-b4562a1736bd',
-          // Заменить на свой API ключ DeepAI
-        },
-        body: {
-          'text': prompt,
-        },
-      );
-
-      print(response.body);
-      print(response.statusCode);
-
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        print(result);
-
-        if (result['output'] != null) {
-          final generatedText = result['output'].trim();
-          final probability = generatedText.replaceAll(RegExp(r'\D'), '');
-          return probability;
-        }
-      }
-    } catch (e) {
-      print('Error analyzing token with DeepAI: $e');
-      return '0';
-    }
-
-    return '0'; // Return default '0' in case of an error or empty response
-  }
-
-  Future<String> _analyzeTokenWithAI(dynamic token) async {
-    if (token == null || token.isEmpty || token.length < 2) return '0';
-    try {
-      const modelUrl =
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyAqWi9myqNVmaClyPhXLgMbveKI9fJAsZs';
-
-      final prompt = '''
-Analyze the next token and determine if it is fraudulent. Specify the probability of fraud (0-100%) only the numbers are correct
-- Symbol: ${token['token']['symbol']}
-- Name: ${token['token']['name']}
-- Address: ${token['token']['address']}
-- Market Cap: ${token['marketCap']}
-- Liquidity: ${token['liquidity']}
-- Holders: ${token['holders']}
-- 24h Volume: ${token['volume24']}
-- 24h Transactions: ${token['txnCount24']}
-- 24h Unique Buys: ${token['uniqueBuys24']}
-- 24h Unique Sells: ${token['uniqueSells24']}
-- Created At: ${token['createdAt']}
-- 24h Price Change: ${token['change24']}
-- 24h High: ${token['high24']}
-- 24h Low: ${token['low24']}
-- Image: ${token['token']['imageThumbUrl']}
-- Description: ${token['token']['description']}
-- Website: ${token['token']['website']}
-''';
-
-      final response = await http.post(
-        Uri.parse(modelUrl),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt},
-              ],
-            },
-          ],
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        if (result['candidates'] != null && result['candidates'].isNotEmpty) {
-          final generatedText =
-              result['candidates'][0]['content']['parts'][0]['text'].trim();
-          final probability = generatedText.replaceAll(RegExp(r'\D'), '');
-          return probability;
-        }
-      }
-    } catch (e) {
-      print('Error analyzing token with Gemini: $e');
-      return '0';
-    }
-
-    return '0'; // Return default '0' in case of an error or empty response
-  }
-
   Future<void> _fetchAndUpdateTokens() async {
     try {
-      final tokens = await fetchTokens();
+      final tokens = await fetchTokensTop200();
       if (mounted) {
         final currentTimeInSeconds =
             DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
         final minTokenAgeInSeconds = 0 * 60;
-        final maxTokenAgeInSeconds = 180 * 60;
+        final maxTokenAgeInSeconds = 240 * 60;
 
         final sortedTokens = tokens.where((token) {
-          final marketCap = token['marketCap'] is String
-              ? double.tryParse(token['marketCap']) ?? 0
-              : (token['marketCap'] as num?)?.toDouble() ?? 0;
-
+          final marketCap = parseDouble(token['marketCap']);
           final creationTime = token['createdAt'] as int;
           final tokenAgeInSeconds = currentTimeInSeconds - creationTime;
-
-          final holders = token['holders'] is String
-              ? int.tryParse(token['holders']) ?? 0
-              : (token['holders'] as num?)?.toInt() ?? 0;
-
-          final hasEnoughMarketCap =
-              marketCap > 20000 && marketCap <= 10_000_000_0;
-
           final isOldEnough = tokenAgeInSeconds >= minTokenAgeInSeconds;
           final isNotTooOld = tokenAgeInSeconds <= maxTokenAgeInSeconds;
-          final hasEnoughHolders = holders >= 400;
+          final holders = parseInt(token['holders']);
 
-          final liquidity = token['liquidity'] is String
-              ? double.tryParse(token['liquidity']) ?? 0
-              : (token['liquidity'] as num?)?.toDouble() ?? 0;
-          final hasEnoughLiquidity = liquidity > 6000;
+          final liquidity = parseDouble(token['liquidity']);
+          final txnCount24 = parseInt(token['txnCount24']);
+          final uniqueBuys24 = parseInt(token['uniqueBuys24']);
+          final uniqueSells24 = parseInt(token['uniqueSells24']);
+          final volume24 = parseDouble(token['volume24']);
+          final change24 = parseDouble(token['change24']);
 
-          final txnCount24 = token['txnCount24'] is String
-              ? int.tryParse(token['txnCount24']) ?? 0
-              : (token['txnCount24'] as num?)?.toInt() ?? 0;
-          final hasEnoughTransactions =
-              txnCount24 > 100; // Например, минимум 1000 транзакций
-
-          final uniqueBuys24 = token['uniqueBuys24'] is String
-              ? int.tryParse(token['uniqueBuys24']) ?? 0
-              : (token['uniqueBuys24'] as num?)?.toInt() ?? 0;
-          final uniqueSells24 = token['uniqueSells24'] is String
-              ? int.tryParse(token['uniqueSells24']) ?? 0
-              : (token['uniqueSells24'] as num?)?.toInt() ?? 0;
+          final isPriceChangeReasonable = change24.abs() < 100;
+          final hasEnoughVolume = volume24 > 50000;
           final hasEnoughUniqueParticipants =
               uniqueBuys24 > 130 && uniqueSells24 > 100;
+          final hasEnoughTransactions = txnCount24 > 100;
+          final hasEnoughLiquidity = liquidity > 6000;
+          final hasEnoughHolders = holders >= 400;
 
-          final volume24 = token['volume24'] is String
-              ? double.tryParse(token['volume24']) ?? 0
-              : (token['volume24'] as num?)?.toDouble() ?? 0;
-          final hasEnoughVolume = volume24 > 50000; // Например, минимум $50,000
-
-          final change24 = token['change24'] is String
-              ? double.tryParse(token['change24']) ?? 0
-              : (token['change24'] as num?)?.toDouble() ?? 0;
-          final isPriceChangeReasonable =
-              change24.abs() < 100; // Например, изменение цены не более 100%
+          final hasEnoughMarketCap =
+              marketCap >= 10000 && marketCap <= 1_000_000 ||
+                  marketCap >= 100000 && marketCap < 3_000_000 ||
+                  marketCap >= 3000000 && marketCap < 5_000_000 ||
+                  marketCap >= 5000000 && marketCap < 20_000_000 ||
+                  marketCap >= 10000000 && marketCap < 50_000_000;
 
           return hasEnoughMarketCap &&
               isOldEnough &&
@@ -270,7 +136,8 @@ Analyze the next token and determine if it is fraudulent. Specify the probabilit
               hasEnoughHolders &&
               hasEnoughLiquidity &&
               hasEnoughTransactions &&
-              hasEnoughUniqueParticipants;
+              hasEnoughUniqueParticipants &&
+              hasEnoughVolume;
         }).toList();
 
         _checkForNewTokens(sortedTokens);
@@ -281,7 +148,7 @@ Analyze the next token and determine if it is fraudulent. Specify the probabilit
     }
   }
 
-  Future<void> _checkForNewTokens(List<dynamic> sortedTokens) async {
+  void _checkForNewTokens(List<dynamic> sortedTokens) async {
     if (_previousTokens.isEmpty) return;
 
     final newTokens = sortedTokens.where((newToken) {
@@ -296,207 +163,40 @@ Analyze the next token and determine if it is fraudulent. Specify the probabilit
     }).toList();
 
     for (var token in newTokens) {
-      final scamProbability = await _analyzeTokenWithAI(_previousTokens.first);
+      final tokenAddress = token['token']['address'];
+      final marketCapAndAge = await fetchDataCoin(tokenAddress);
+      final marketCap = double.parse(marketCapAndAge.marketCap);
 
-      if (int.parse(scamProbability) <= 60) {
-        final tokenAddress = token['token']['address'];
-        AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
-        _sendTelegramNotificationMemCoins(token, scamProbability);
-        _sentTokens.add(tokenAddress);
+      if (marketCapAndAge.age <= 300) {
+        if (marketCapAndAge.age <= 5 && marketCap <= 500000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 15 && marketCap <= 1000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 30 && marketCap <= 3000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 50 && marketCap <= 5000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 100 && marketCap <= 10000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 200 && marketCap <= 20000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 240 && marketCap <= 30000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        } else if (marketCapAndAge.age <= 300 && marketCap <= 50000000) {
+          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+        }
       }
     }
   }
 
-  Future<void> _sendTelegramNotificationMemCoins(
-      dynamic token, String scamProbability) async {
-    final String symbol = token['token']['symbol'];
-    final String name = token['token']['name'] ?? "Unknown";
-    final String marketCap = formatMarketCap(token['marketCap']);
-    final String liquidity = formatNumber(token['liquidity']);
-    final String age = calculateTokenAge(token['createdAt']);
-    final String? imageUrl = token['token']['imageThumbUrl'];
-    final String tokenAddress = token['token']['address'];
-    final String txnCount24 = (token['txnCount24'] ?? 0).toString();
-    final String uniqueBuys24 = (token['uniqueBuys24'] ?? 0).toString();
-    final String uniqueSells24 = (token['uniqueSells24'] ?? 0).toString();
-    final String change24 = (token['change24'] ?? 0).toString();
-
-    final String caption = '''
-*Новый токен обнаружен!* 🚀
-
-🔹 *Название:* $name : $scamProbability% scam
-🔹 *Символ:* $symbol
-🔹 *Маркеткап:* $marketCap
-🔹 *Возраст:* $age
-🔹 *Ликвидность:* $liquidity
-🔹 *Транзакции:* $txnCount24
-🔹 *Уникальные покупки:* $uniqueBuys24
-🔹 *Уникальные продажи:* $uniqueSells24
-🔹 *Холдеры:* ${token['holders'] ?? 'N/A'}
-🔹 *Изменение цены:* $change24
-
-
-`$tokenAddress`
-'''
-        .trim();
-
-    final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
-    final String messageUrl =
-        'https://api.telegram.org/bot$telegramBotToken/sendMessage';
-
-    try {
-      http.Response response;
-
-      if (imageUrl != null && imageUrl.isNotEmpty) {
-        final imageResponse = await http.get(Uri.parse(imageUrl)).timeout(
-          Duration(seconds: 10),
-          onTimeout: () {
-            throw Exception("Timeout loading image");
-          },
-        );
-
-        if (imageResponse.statusCode == 200 &&
-            imageResponse.bodyBytes.isNotEmpty) {
-          var request = http.MultipartRequest('POST', Uri.parse(url))
-            ..fields['chat_id'] = chatId
-            ..fields['caption'] = caption
-            ..fields['parse_mode'] = 'Markdown'
-            ..files.add(http.MultipartFile.fromBytes(
-              'photo',
-              imageResponse.bodyBytes,
-              filename: 'token_$symbol.png',
-            ));
-
-          final streamedResponse = await request.send().timeout(
-            Duration(seconds: 10),
-            onTimeout: () {
-              print("Тайм-аут при отправке фото в Telegram");
-              throw Exception("Timeout sending photo");
-            },
-          );
-          response = await http.Response.fromStream(streamedResponse);
-
-          if (response.statusCode != 200) {
-            print(
-                "Ошибка отправки фото в Telegram: ${response.statusCode}, ${response.body}");
-          }
-        } else {
-          print(
-              "Не удалось загрузить изображение: ${imageResponse.statusCode}, размер: ${imageResponse.bodyBytes.length}");
-          // Отправляем только текст, если изображение не загружено
-          response = await http.post(
-            Uri.parse(messageUrl),
-            body: {
-              'chat_id': chatId,
-              'text': caption,
-              'parse_mode': 'Markdown',
-            },
-          );
-        }
-      } else {
-        response = await http.post(
-          Uri.parse(messageUrl),
-          body: {
-            'chat_id': chatId,
-            'text': caption,
-            'parse_mode': 'Markdown',
-          },
-        );
-      }
-    } catch (e) {
-      print("Ошибка при отправке уведомления в Telegram: $e");
-    }
-  }
-
-  Future<List<dynamic>> fetchTokens() async {
-    final url = 'https://www.defined.fi/api';
-
-    final headers = {
-      'accept': '*/*',
-      'accept-language': 'ru,en;q=0.9',
-      'content-type': 'application/json',
-      'origin': 'https://www.defined.fi',
-      'user-agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 YaBrowser/25.2.0.0 Safari/537.36',
-    };
-
-    final data = {
-      "operationName": "FilterTokens",
-      "variables": {
-        "filters": {
-          "volume24": {"lte": 100000000000},
-          "liquidity": {"lte": 1000000000},
-          "marketCap": {"lte": 1000000000000},
-          "createdAt": {"gte": 1741396500},
-          "network": [1399811149],
-          "trendingIgnored": false,
-          "creatorAddress": null,
-          "potentialScam": false,
-        },
-        "statsType": "FILTERED",
-        "offset": 0,
-        "rankings": [
-          {"attribute": "trendingScore24", "direction": "DESC"},
-        ],
-        "limit": 200,
-      },
-      "query": """
-        query FilterTokens(\$filters: TokenFilters, \$statsType: TokenPairStatisticsType, \$phrase: String, \$tokens: [String], \$rankings: [TokenRanking], \$limit: Int, \$offset: Int) {
-          filterTokens(
-            filters: \$filters
-            statsType: \$statsType
-            phrase: \$phrase
-            tokens: \$tokens
-            rankings: \$rankings
-            limit: \$limit
-            offset: \$offset
-          ) {
-            results {
-              buyCount1
-              buyCount24
-              sellCount1
-              sellCount24
-              priceUSD
-              marketCap
-              liquidity
-              volume1
-              volume24
-              holders
-              change24
-              high24
-              low24
-              uniqueBuys24
-              uniqueSells24
-              txnCount24
-              uniqueTransactions24
-              createdAt
-              token {
-                name
-                symbol
-                imageThumbUrl
-                address
-              }
-            }
-          }
-        }
-      """,
-    };
-
-    try {
-      final response = await dio.post(
-        url,
-        options: Options(headers: headers),
-        data: jsonEncode(data),
-      );
-
-      if (response.statusCode == 200) {
-        return response.data['data']['filterTokens']['results'];
-      } else {
-        throw Exception("Error: ${response.statusCode}");
-      }
-    } catch (e) {
-      throw Exception("Request failed: $e");
+  Future<void> _notifyAndSaveToken(
+      token, MarketCapAndAge marketCapAndAge, tokenAddress) async {
+    final scamProbability = await analyzeTokenWithAI(token, marketCapAndAge);
+    if (int.parse(scamProbability) <= 70) {
+      AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+      sendTelegramNotificationMemCoins(token, scamProbability, marketCapAndAge);
+      _sentTokens.add(tokenAddress);
+      _saveTokens.add(token);
     }
   }
 
@@ -512,20 +212,6 @@ Analyze the next token and determine if it is fraudulent. Specify the probabilit
       }
     }
     _isMonitoringBinance = false;
-  }
-
-  Future<void> _monitorOKXConnection() async {
-    _isMonitoringOKX = true;
-    while (_isMonitoringOKX) {
-      await Future.delayed(Duration(seconds: 5));
-      if (_lastMessageTimeOKX != null &&
-          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
-        print('No data received from OKX for 30 seconds. Reconnecting...');
-        await _connectWebSocketOKX();
-        break;
-      }
-    }
-    _isMonitoringOKX = false;
   }
 
   Future<void> _monitorHuobiConnection() async {
@@ -1324,9 +1010,15 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                       coinsListHuobi = [];
                       coinsListForSelect = [];
                       itemChartMain = [];
-                      setState(() {});
-                      _fetchCoinData();
-                      _loadPriceChangeThreshold();
+
+                      await _channelSpotBinanceFeatured?.sink.close();
+                      await _huobiChannel?.sink.close();
+                      await _okxChannel?.sink.close();
+
+                      Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => TokenPriceMonitorScreen()));
                     },
                     child: Icon(Icons.refresh, size: 18),
                   ),
