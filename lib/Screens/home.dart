@@ -71,7 +71,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _startTimer() async {
-    Timer.periodic(Duration(seconds: 2), (_) {
+    Timer.periodic(Duration(seconds: 1), (_) {
       _fetchAndUpdateTokens();
     });
   }
@@ -85,9 +85,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     coinsListHuobi = [];
     coinsListForSelect = [];
     itemChartMain = [];
-    _fetchCoinData();
-    _loadPriceChangeThreshold();
-    _startTimer();
+    // _fetchCoinData();
+    // _loadPriceChangeThreshold();
+    // _startTimer();
   }
 
   Future<void> _fetchAndUpdateTokens() async {
