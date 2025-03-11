@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
@@ -14,7 +15,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Token Price Monitor',
+      title: 'Pump.fun Token Monitor',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
@@ -31,54 +32,75 @@ class TokenPriceMonitorScreen extends StatefulWidget {
 }
 
 class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
-  final TextEditingController _poolIdController = TextEditingController(text: '171508434');
-  final TextEditingController _tokenAddressController = TextEditingController();
+  final TextEditingController _tokenMintController = TextEditingController();
   WebSocketChannel? _channel;
   bool _isMonitoring = false;
   String _status = 'Disconnected';
-  String _baseTokenName = 'Unknown';
-  String _quoteTokenName = 'Unknown';
-  String _baseTokenPrice = 'N/A';
-  String _quoteTokenPrice = 'N/A';
-  String _baseTokenMarketCap = 'N/A';
-  String _quoteTokenMarketCap = 'N/A';
-  String _baseTokenAmount = 'N/A'; // Новая переменная для объема базового токена
-  String _quoteTokenAmount = 'N/A'; // Новая переменная для объема котируемого токена
-  int _lastSwapTimestamp = 0; // Новая переменная для времени последней сделки
-  String _tokenAddress = '';
   String _tokenName = 'N/A';
+  String _tokenSymbol = 'N/A';
   String _tokenPrice = 'N/A';
-  String _tokenMarketCap = 'N/A';
+  String _marketCap = 'N/A';
+  String _lastTradeAmount = 'N/A';
+  String _lastTradeTimestamp = 'N/A';
+  bool _lastTradeIsBuy = false;
+  double _solPrice = 121.0;
+  Timer? _pingTimer;
+  Timer? _reconnectTimer;
+  String? _sid;
+  String? _subscribedMint;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 5;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectWebSocket(); // Автоматическое подключение при запуске
+  }
 
   @override
   void dispose() {
-    _disconnectWebSocket();
-    _poolIdController.dispose();
-    _tokenAddressController.dispose();
+    _cleanup();
+    _tokenMintController.dispose();
     super.dispose();
   }
 
+  void _cleanup() {
+    _pingTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _channel?.sink.close();
+  }
+
   Future<void> _connectWebSocket() async {
-    if (_poolIdController.text.isEmpty) {
+    if (_tokenMintController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a pool ID')),
+        const SnackBar(content: Text('Please enter a token mint address')),
       );
       return;
     }
 
+    _subscribedMint = _tokenMintController.text.trim();
+    await _establishConnection();
+  }
+
+  Future<void> _establishConnection() async {
     setState(() {
       _isMonitoring = true;
-      _status = 'Connecting...';
+      _status = 'Connecting... (Attempt ${_reconnectAttempts + 1})';
     });
 
     try {
       _channel = IOWebSocketChannel.connect(
-        Uri.parse('wss://cables.geckoterminal.com/cable'),
+        Uri.parse('wss://frontend-api-v3.pump.fun/socket.io/?EIO=4&transport=websocket'),
         headers: {
           'Upgrade': 'websocket',
-          'Origin': 'https://www.geckoterminal.com',
+          'Origin': 'https://pump.fun',
+          'Cache-Control': 'no-cache',
+          'Accept-Language': 'ru,en;q=0.9',
+          'Pragma': 'no-cache',
+          'Connection': 'Upgrade',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
           'Sec-WebSocket-Version': '13',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+          'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
         },
       );
 
@@ -88,104 +110,102 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
         },
         onError: (error) {
           print('WebSocket error: $error');
-          setState(() {
-            _status = 'Error: $error';
-            _isMonitoring = false;
-          });
+          _handleDisconnect();
         },
         onDone: () {
           print('WebSocket connection closed');
-          setState(() {
-            _status = 'Disconnected';
-            _isMonitoring = false;
-          });
+          _handleDisconnect();
         },
+        cancelOnError: true,
       );
 
-      _subscribeToChannels();
+      _channel?.sink.add('40');
     } catch (e) {
       print('Failed to connect to WebSocket: $e');
+      _handleDisconnect();
+    }
+  }
+
+  void _handleDisconnect() {
+    _cleanup();
+    if (_isMonitoring && _reconnectAttempts < _maxReconnectAttempts) {
+      _reconnectAttempts++;
+      final delay = Duration(seconds: pow(1, _reconnectAttempts).toInt()); // Увеличиваем задержку
       setState(() {
-        _status = 'Failed to connect: $e';
+        _status = 'Disconnected. Reconnecting in ${delay.inSeconds}s... (Attempt $_reconnectAttempts)';
+      });
+      _reconnectTimer = Timer(delay, () {
+        _establishConnection();
+      });
+    } else if (_reconnectAttempts >= _maxReconnectAttempts) {
+      setState(() {
+        _status = 'Max reconnection attempts reached';
         _isMonitoring = false;
+        _reconnectAttempts = 0;
       });
     }
   }
 
-  void _subscribeToChannels() {
-    final poolId = _poolIdController.text.trim();
-    final subscribeSwapChannel = {
-      "command": "subscribe",
-      "identifier": jsonEncode({"channel": "SwapChannel", "pool_id": poolId}),
-    };
-    final subscribePoolChannel = {
-      "command": "subscribe",
-      "identifier": jsonEncode({"channel": "PoolChannel", "pool_id": poolId}),
-    };
-
-    _channel?.sink.add(jsonEncode(subscribeSwapChannel));
-    _channel?.sink.add(jsonEncode(subscribePoolChannel));
-    setState(() {
-      _status = 'Subscribed to channels for pool ID: $poolId';
+  void _startPing() {
+    _pingTimer = Timer.periodic(const Duration(seconds: 30), (timer) { // Увеличиваем интервал пинга
+      if (_channel != null && _isMonitoring) {
+        _channel?.sink.add('2');
+        print('Sent ping');
+      }
     });
-    print('Subscribed to SwapChannel and PoolChannel for pool ID: $poolId');
+  }
+
+  void _subscribeToTradeRoom() {
+    final mint = _subscribedMint!;
+    final joinMessage = '42["joinTradeRoom",{"mint":"$mint"}]';
+    _channel?.sink.add(joinMessage);
+    setState(() {
+      _status = 'Subscribed to trade room for mint: $mint';
+    });
+    print('Subscribed to trade room: $mint');
   }
 
   void _handleWebSocketMessage(dynamic message) {
     if (!mounted) return;
 
-    print('WebSocket message: $message');
     try {
-      final data = jsonDecode(message);
-      if (data['type'] == 'ping') return;
+      if (message.startsWith('0')) {
+        final data = jsonDecode(message.substring(1));
+        _sid = data['sid'];
+        setState(() {
+          _status = 'Connected to WebSocket (SID: $_sid)';
+          _reconnectAttempts = 0; // Сброс попыток при успешном подключении
+        });
+        _startPing();
+        _subscribeToTradeRoom();
+      } else if (message.startsWith('2')) {
+        print('Received pong');
+      } else if (message.startsWith('42')) {
+        final jsonString = message.substring(2);
+        final data = jsonDecode(jsonString);
+        final event = data[0];
+        final tradeData = data[1];
 
-      if (data['type'] == 'welcome') {
-        setState(() {
-          _status = 'Connected to WebSocket';
-        });
-      } else if (data['type'] == 'confirm_subscription') {
-        setState(() {
-          _status = 'Subscription confirmed: ${data['identifier']}';
-        });
-      } else if (data['type'] == 'reject_subscription') {
-        setState(() {
-          _status = 'Subscription rejected: ${data['identifier']}';
-        });
-      } else if (data['identifier'] != null && data['message'] != null) {
-        final identifier = jsonDecode(data['identifier']);
-        if (identifier['channel'] == 'SwapChannel') {
-          final swapData = data['message']['data'];
+        if (tradeData['mint'] == _subscribedMint ||
+            event == 'tradeCreated:$_subscribedMint') {
           setState(() {
-            _status = 'New swap received';
-            // Обновляем цены токенов и объемы из свопа
-            if (swapData['from_token_id'] == 38874034) {
-              _baseTokenPrice = swapData['price_from_in_usd'];
-              _quoteTokenPrice = swapData['price_to_in_usd'];
-              _baseTokenAmount = swapData['from_token_amount'];
-              _quoteTokenAmount = swapData['to_token_amount'];
-            } else if (swapData['from_token_id'] == 4045901) {
-              _baseTokenPrice = swapData['price_to_in_usd'];
-              _quoteTokenPrice = swapData['price_from_in_usd'];
-              _baseTokenAmount = swapData['to_token_amount'];
-              _quoteTokenAmount = swapData['from_token_amount'];
-            }
-            _lastSwapTimestamp = swapData['block_timestamp'];
+            _status = 'New trade received for $_subscribedMint';
+            _tokenName = tradeData['name'] ?? 'N/A';
+            _tokenSymbol = tradeData['symbol'] ?? 'N/A';
+            _marketCap = tradeData['usd_market_cap']?.toStringAsFixed(2) ?? 'N/A';
+
+            final solAmount = tradeData['sol_amount'] / 1e9;
+            final tokenAmount = tradeData['token_amount'] / 1e6;
+            final priceInSol = solAmount / tokenAmount;
+            final priceInUsd = priceInSol * _solPrice;
+            _tokenPrice = priceInUsd.toStringAsFixed(6);
+
+            _lastTradeAmount =
+            '${solAmount.toStringAsFixed(4)} SOL (${(tradeData['token_amount'] / 1e6).toStringAsFixed(2)} $_tokenSymbol)';
+            _lastTradeTimestamp = DateTime.fromMillisecondsSinceEpoch(tradeData['timestamp'] * 1000).toLocal().toString();
+            _lastTradeIsBuy = tradeData['is_buy'];
           });
-          print('New swap data: $swapData');
-        } else if (identifier['channel'] == 'PoolChannel') {
-          final poolData = data['message']['data']['included'][0]['attributes'];
-          setState(() {
-            _status = 'Pool update received';
-            _baseTokenName = poolData['base_name'];
-            _quoteTokenName = poolData['quote_name'];
-            _baseTokenPrice = poolData['base_price_in_usd'];
-            _quoteTokenPrice = poolData['quote_price_in_usd'];
-            // Проверяем наличие market cap в token_value_data
-            final tokenValueData = data['message']['data']['data']['attributes']['token_value_data'];
-            _baseTokenMarketCap = tokenValueData['38874034']['market_cap_in_usd']?.toString() ?? 'N/A';
-            _quoteTokenMarketCap = tokenValueData['4045901']['market_cap_in_usd']?.toString() ?? 'N/A';
-          });
-          print('Pool update data: $poolData');
+          print('Filtered trade data for $_subscribedMint: $tradeData');
         }
       }
     } catch (e) {
@@ -197,50 +217,19 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
   }
 
   void _disconnectWebSocket() {
-    _channel?.sink.close();
+    _cleanup();
     setState(() {
       _status = 'Disconnected';
       _isMonitoring = false;
+      _reconnectAttempts = 0;
     });
-  }
-
-  void _updateTokenInfo() {
-    final tokenAddress = _tokenAddressController.text.trim();
-    if (tokenAddress.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a token address')),
-      );
-      return;
-    }
-
-    setState(() {
-      _tokenAddress = tokenAddress;
-      _tokenName = 'Loading...';
-      _tokenPrice = 'Loading...';
-      _tokenMarketCap = 'Loading...';
-    });
-
-    // Здесь можно добавить логику для получения информации о токене по его адресу
-    Future.delayed(const Duration(seconds: 2), () {
-      setState(() {
-        _tokenName = 'Token Name';
-        _tokenPrice = '\$1.23';
-        _tokenMarketCap = '\$100,000,000';
-      });
-    });
-  }
-
-  String _formatTimestamp(int timestamp) {
-    // Предполагаем, что timestamp в миллисекундах
-    final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    return '${dateTime.toLocal()}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Token Price Monitor'),
+        title: const Text('Pump.fun Token Monitor'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -249,27 +238,12 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               TextField(
-                controller: _poolIdController,
+                controller: _tokenMintController,
                 decoration: const InputDecoration(
-                  labelText: 'Pool ID',
-                  hintText: 'Enter the pool ID (e.g., 171508434)',
+                  labelText: 'Token Mint Address',
+                  hintText: 'Enter the token mint address (e.g., FCSjDJ1b2wMz286vCrDrJMS7Z8MhU7L183qewRf7pump)',
                 ),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _tokenAddressController,
-                decoration: const InputDecoration(
-                  labelText: 'Token Address',
-                  hintText: 'Enter the token address',
-                ),
-              ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: _updateTokenInfo,
-                child: const Text('Update Token Info'),
-              ),
-              const SizedBox(height: 10),
-              Text('Status: $_status', style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -285,26 +259,18 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              Text('Token 1:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Name: $_baseTokenName'),
-              Text('Price: \$$_baseTokenPrice USD'),
-              Text('Market Cap: $_baseTokenMarketCap USD'),
+              Text('Status: $_status', style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 20),
-              Text('Token 2:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Name: $_quoteTokenName'),
-              Text('Price: \$$_quoteTokenPrice USD'),
-              Text('Market Cap: $_quoteTokenMarketCap USD'),
-              const SizedBox(height: 20),
-              Text('Last Swap Details:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Base Token Amount: $_baseTokenAmount'),
-              Text('Quote Token Amount: $_quoteTokenAmount'),
-              Text('Timestamp: ${_formatTimestamp(_lastSwapTimestamp)}'),
-              const SizedBox(height: 20),
-              Text('Custom Token:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Address: $_tokenAddress'),
+              Text('Token Info:', style: Theme.of(context).textTheme.titleLarge),
               Text('Name: $_tokenName'),
-              Text('Price: $_tokenPrice'),
-              Text('Market Cap: $_tokenMarketCap'),
+              Text('Symbol: $_tokenSymbol'),
+              Text('Price: \$$_tokenPrice USD'),
+              Text('Market Cap: \$$_marketCap USD'),
+              const SizedBox(height: 20),
+              Text('Last Trade:', style: Theme.of(context).textTheme.titleLarge),
+              Text('Amount: $_lastTradeAmount'),
+              Text('Type: ${_lastTradeIsBuy ? 'Buy' : 'Sell'}'),
+              Text('Timestamp: $_lastTradeTimestamp'),
             ],
           ),
         ),
