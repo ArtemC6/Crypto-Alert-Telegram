@@ -7,49 +7,52 @@ import '../model/token_model.dart';
 import '../utils.dart';
 
 Future<void> sendTelegramNotificationMemCoins(
-    dynamic token,
-    String scamProbability,
-    MarketCapAndAge marketCapAndAge) async {
-  final String symbol = token['token']['symbol'];
-  final String name = token['token']['name'] ?? "Unknown";
-  final String liquidity = formatMarketCap(token['liquidity']);
-  final String? imageUrl = token['token']['imageThumbUrl'];
-  final String tokenAddress = token['token']['address'];
-  final String txnCount24 = (token['txnCount24'] ?? 0).toString();
-  final String uniqueBuys24 = (token['uniqueBuys24'] ?? 0).toString();
-  final String uniqueSells24 = (token['uniqueSells24'] ?? 0).toString();
+    dynamic token, String scamProbability, TokenInfo marketCapAndAge) async {
+  try {
+    final String symbol = token['token']['symbol'];
+    final String name = token['token']['name'] ?? "Unknown";
+    final String liquidity = formatMarketCap(token['liquidity']);
+    final String? imageUrl = token['token']['imageThumbUrl'];
+    final String tokenAddress = token['token']['address'];
+    final String txnCount24 = (token['txnCount24'] ?? 0).toString();
+    final String uniqueBuys24 = (token['uniqueBuys24'] ?? 0).toString();
+    final String uniqueSells24 = (token['uniqueSells24'] ?? 0).toString();
 
-  final socialLinks = token['token']['socialLinks'] ?? {};
-  final String? discordLink = socialLinks['discord'];
-  final String? telegramLink = socialLinks['telegram'];
-  final String? twitterLink = socialLinks['twitter'];
-  final String? websiteLink = socialLinks['website'];
+    final socialLinks = token['token']['socialLinks'] ?? {};
+    final String? discordLink = socialLinks['discord'];
+    final String? telegramLink = socialLinks['telegram'];
+    final String? twitterLink = socialLinks['twitter'];
+    final String? websiteLink = socialLinks['website'];
 
-  String socialLinksString = '';
+    final int timestamp = marketCapAndAge.creationTimestamp != 0
+        ? marketCapAndAge.creationTimestamp
+        : marketCapAndAge.openTimestamp;
 
-  socialLinksString +=
-      '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
+    final int age = DateTime.now().difference(getDateTime(timestamp)).inMinutes;
 
-  if (discordLink != null && discordLink.isNotEmpty) {
-    socialLinksString += '🔹 *Discord:* $discordLink\n';
-  }
-  if (telegramLink != null && telegramLink.isNotEmpty) {
-    socialLinksString += '🔹 *Telegram:* $telegramLink\n';
-  }
-  if (twitterLink != null && twitterLink.isNotEmpty) {
-    socialLinksString += '🔹 *Twitter:* $twitterLink\n';
-  }
-  if (websiteLink != null && websiteLink.isNotEmpty) {
-    socialLinksString += '🔹 *Website:* $websiteLink\n';
-  }
+    String socialLinksString =
+        '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
 
-  final String caption = '''
+    if (discordLink?.isNotEmpty ?? false) {
+      socialLinksString += '🔹 *Discord:* $discordLink\n';
+    }
+    if (telegramLink?.isNotEmpty ?? false) {
+      socialLinksString += '🔹 *Telegram:* $telegramLink\n';
+    }
+    if (twitterLink?.isNotEmpty ?? false) {
+      socialLinksString += '🔹 *Twitter:* $twitterLink\n';
+    }
+    if (websiteLink?.isNotEmpty ?? false) {
+      socialLinksString += '🔹 *Website:* $websiteLink\n';
+    }
+
+    final String caption = '''
 *Новый токен обнаружен!* 🚀
 
 🔹 *Название:* $name : $scamProbability% scam
 🔹 *Символ:* $symbol
 🔹 *Маркеткап:* ${formatMarketCap(marketCapAndAge.marketCap.toString())}
-🔹 *Возраст:* ${formatAge(marketCapAndAge.age)}
+🔹 *Возраст:* ${formatAge(age)}
 🔹 *Ликвидность:* $liquidity
 🔹 *Транзакции:* $txnCount24
 🔹 *Уникальные покупки:* $uniqueBuys24
@@ -60,21 +63,23 @@ $socialLinksString
 
 `$tokenAddress`
 '''
-      .trim();
+        .trim();
 
-  final String url = 'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
-  final String messageUrl =
-      'https://api.telegram.org/bot$telegramBotToken/sendMessage';
+    final String url =
+        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+    final String messageUrl =
+        'https://api.telegram.org/bot$telegramBotToken/sendMessage';
 
-  try {
     http.Response response;
 
-    if (imageUrl != null && imageUrl.isNotEmpty) {
-      final imageResponse = await http.get(Uri.parse(imageUrl)).timeout(
+    if ((imageUrl?.isNotEmpty ?? false) || marketCapAndAge.logo.isNotEmpty) {
+      final String effectiveImageUrl = marketCapAndAge.logo.isNotEmpty
+          ? marketCapAndAge.logo
+          : imageUrl ?? '';
+      final imageResponse =
+      await http.get(Uri.parse(effectiveImageUrl)).timeout(
         Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception("Timeout loading image");
-        },
+        onTimeout: () => throw Exception("Timeout loading image"),
       );
 
       if (imageResponse.statusCode == 200 &&
@@ -91,10 +96,7 @@ $socialLinksString
 
         final streamedResponse = await request.send().timeout(
           Duration(seconds: 10),
-          onTimeout: () {
-            print("Тайм-аут при отправке фото в Telegram");
-            throw Exception("Timeout sending photo");
-          },
+          onTimeout: () => throw Exception("Timeout sending photo"),
         );
         response = await http.Response.fromStream(streamedResponse);
 
@@ -105,7 +107,6 @@ $socialLinksString
       } else {
         print(
             "Не удалось загрузить изображение: ${imageResponse.statusCode}, размер: ${imageResponse.bodyBytes.length}");
-        // Отправляем только текст, если изображение не загружено
         response = await http.post(
           Uri.parse(messageUrl),
           body: {
@@ -125,35 +126,47 @@ $socialLinksString
         },
       );
     }
+
+    if (response.statusCode != 200) {
+      print(
+          "Ошибка отправки сообщения в Telegram: ${response.statusCode}, ${response.body}");
+    }
   } catch (e) {
     print("Ошибка при отправке уведомления в Telegram: $e");
   }
 }
 
 Future<String> analyzeTokenWithAI(
-    dynamic token, MarketCapAndAge marketCapAndAge) async {
+    dynamic token, TokenInfo marketCapAndAge) async {
   if (token == null || token.isEmpty || token.length < 2) return '0';
   try {
     const modelUrl =
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyAqWi9myqNVmaClyPhXLgMbveKI9fJAsZs';
 
+    final int timestamp = marketCapAndAge.creationTimestamp != 0
+        ? marketCapAndAge.creationTimestamp
+        : marketCapAndAge.openTimestamp;
+
+    final int age =
+        DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+
     final prompt = '''
 Analyze the next token and determine if it is fraudulent. Specify the probability of fraud (0-100%) only the numbers are correct
-- Symbol: ${token['token']['symbol']}
-- Name: ${token['token']['name']}
-- Address: ${token['token']['address']}
+- Symbol: ${marketCapAndAge.symbol}
+- Name: ${marketCapAndAge.name}
+- Address: ${marketCapAndAge.address}
 - Market Cap: ${marketCapAndAge.marketCap}
 - Liquidity: ${marketCapAndAge.liquidity}
-- Holders: ${marketCapAndAge.holders}
-- 24h Volume: ${marketCapAndAge.volume24h}
-- 24h Transactions: ${token['txnCount24']}
-- 24h Unique Buys: ${token['uniqueBuys24']}
-- 24h Unique Sells: ${token['uniqueSells24']}
-- Age: ${marketCapAndAge.age}
-- 24h Price Change: ${token['change24']}
-- 24h High: ${token['high24']}
-- 24h Low: ${token['low24']}
-- Image: ${token['token']['imageThumbUrl']}
+- Holders: ${marketCapAndAge.holderCount}
+- 24h Volume: ${marketCapAndAge.price.volume24h}
+- 24h Transactions: ${marketCapAndAge.price.swaps24h}
+- 24h Unique Buys: ${marketCapAndAge.price.buys24h}
+- 24h Unique Sells: ${marketCapAndAge.price.sells24h}
+- Age: ${formatAge(age)}
+- 24h Price Change: ${marketCapAndAge.price.price24h}
+- 24h High: ${marketCapAndAge.price.price24h}
+- 24h Low: ${marketCapAndAge.price.price24h}
+- Image: ${marketCapAndAge.logo}
 - Description: ${token['token']['description']}
 - Website: ${token['token']['website']}
 - Discord: ${token['token']['socialLinks']['discord']}
@@ -194,82 +207,88 @@ Analyze the next token and determine if it is fraudulent. Specify the probabilit
   return '0'; // Return default '0' in case of an error or empty response
 }
 
-Future<MarketCapAndAge> fetchDataCoin(String address) async {
+Future<void> fetchTokenData(String tokenAddress) async {
   final url = Uri.parse(
-      'https://www.dextools.io/shared/data/pair?address=$address&chain=solana&audit=true&locks=true');
-
-  final response = await http.get(
-    url,
-    headers: {
-      'sec-ch-ua-platform': '"macOS"',
-      'Referer': 'https://www.dextools.io/app/en/solana/pair-explorer/$address',
-      'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-      'Accept': 'application/json',
-      'sec-ch-ua':
-          '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
-      'Content-Type': 'application/json',
-      'sec-ch-ua-mobile': '?0',
-    },
+    'https://gmgn.ai/defi/quotation/v1/tokens/sol?device_id=c59b7099-e88b-4429-b966-0639de35fce3&client_id=gmgn_web_2025.0310.180936&from_app=gmgn&app_ver=2025.0310.180936&tz_name=Asia%2FBishkek&tz_offset=21600&app_lang=en-US&token_address=$tokenAddress',
   );
 
+  final headers = {
+    'accept': 'application/json, text/plain, */*',
+    'accept-language': 'ru,en;q=0.9',
+    'cookie':
+        '_ga=GA1.1.1863043302.1732293754; _ga_0XM0LYXGC8=deleted; sid=gmgn%7Cda82b3b094181dbad8120c068626ca51; _ga_UGLVBMV4Z0=GS1.2.1739875344121859.00b3db0581efca8f9b5bff823615579d.uEE6NQFCK1%2FE0EADpJ%2BFUQ%3D%3D.4QTgtUj3Dzl9RPpPT%2BoBow%3D%3D.R3Mb1P43pTcAINajl%2B%2Bvdw%3D%3D.eWgkzJYDdUX13VyUbig4Fw%3D%3D; cf_clearance=nDc8NVRvVIdm7KYbvfvTVnlEMZOUcek8vPzfmLfhDKE-1741630418-1.2.1.1-9J6FjXQTorFvKNAo9q_LagTyAxvevqWYZI23qN4laNd6.0o5OtT8KcCReAiH0eMighoFfTBKdYwyKd06vT.JfPlnkIaMJTj6ad4VZ_nRRcZCwu1GNqY33WU1SnjLD_kyWksCSocADVLB7Y3lV9JLAfd4hG.rAtFKxO54xUNnLbTMInC2S1e94OY_sqnVkGjjjJc_UOnipBJe3hwJWQdIXmnE3TWaJx49J2qLQjOEuT.qllOqL3ux_IPeXEBRjVs6p9T8wdZeEUrAVIYH3q88vfgfxknbrGSoqwHoAE8F9wCVfYQoeT4bvorzSowvLlso.1IAfrWvEK460IzDkNFE6f1v5EjD4s517nw1OZGtJOI; __cf_bm=XHP55zBc1mXlYXRyy7va2BuvI2ITSschF5bfBdBDD.c-1741639724-1.0.1.1-uBEiSQA4wZVY3BCH_w.nKNSabyZr3v.Si1HXX.kNXfVZYC5U9rwj8MSfCTi9GjNjrdDjyOPdF0AzSvwBGBh7sv4SOxRalI3nYKa6OvyL47c; _ga_0XM0LYXGC8=GS1.1.1741639931.83.1.1741639949.0.0.0',
+    'if-none-match': 'W/"192e-nTXDK3kNECqkldbwsQFhf7HuPy8"',
+    'priority': 'u=1, i',
+    'referer':
+        'https://gmgn.ai/sol/token/Kf4sQtl9_4UdXLsCXkcat78UhykL2fq3Xm7cehdSiNifeyRcJpump',
+    'sec-ch-ua':
+        '"Not A(Brand";v="8", "Chromium";v="132", "YaBrowser";v="25.2", "Yowser";v="2.5"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 YaBrowser/25.2.0.0 Safari/537.36',
+  };
+
+  final response = await http.get(url, headers: headers);
+
   if (response.statusCode == 200) {
+    // Успешный запрос
     final data = json.decode(response.body);
-    try {
-      final results = data['data'] as List<dynamic>;
-
-      if (results.isEmpty) {
-        print('No results found.');
-        return MarketCapAndAge(
-          age: 0,
-          marketCap: '0',
-          tokenName: 'Unknown',
-          symbol: 'N/A',
-          price: 0.0,
-          price24h: 0.0,
-          volume24h: 0.0,
-          holders: 0,
-          liquidity: 0.0,
-          creationTime: DateTime.now(),
-          fdv: 0.0,
-        );
-      }
-
-      // Берем первый результат
-      final firstResult = results[0];
-      return MarketCapAndAge.fromJson(firstResult);
-    } catch (e) {
-      print('Error fetching market cap and age: $e');
-      return MarketCapAndAge(
-        age: 0,
-        marketCap: '0',
-        tokenName: 'Error',
-        symbol: 'N/A',
-        price: 0.0,
-        price24h: 0.0,
-        volume24h: 0.0,
-        holders: 0,
-        liquidity: 0.0,
-        creationTime: DateTime.now(),
-        fdv: 0.0,
-      );
-    }
+    print(data);
   } else {
-    print('Failed to load data: ${response.statusCode}');
-    return MarketCapAndAge(
-      age: 0,
-      marketCap: '0',
-      tokenName: 'Unknown',
-      symbol: 'N/A',
-      price: 0.0,
-      price24h: 0.0,
-      volume24h: 0.0,
-      holders: 0,
-      liquidity: 0.0,
-      creationTime: DateTime.now(),
-      fdv: 0.0,
-    );
+    // Обработка ошибок
+    print('Ошибка: ${response.statusCode}');
+    print('Тело ответа: ${response.body}');
   }
+}
+
+Future<void> fetchTokenData1() async {
+  // Создаем экземпляр Dio
+
+  try {
+    // Выполняем GET запрос
+  } catch (e) {
+    print('Error occurred: $e');
+  }
+}
+
+Future<TokenInfo?> fetchTokenInfo(String tokenAddress) async {
+  final dio = Dio();
+  final url = 'https://gmgn.ai/api/v1/mutil_window_token_info';
+  final headers = {
+    'accept': 'application/json, text/plain, */*',
+    'accept-language': 'ru,en;q=0.9',
+    'content-type': 'application/json',
+    'origin': 'https://gmgn.ai',
+    'priority': 'u=1, i',
+    'referer': 'https://gmgn.ai/sol/token/$tokenAddress',
+  };
+  final params = {
+    'from_app': 'gmgn',
+    'tz_name': 'Asia/Bishkek',
+    'tz_offset': 21600,
+    'app_lang': 'en-US',
+  };
+  final data = {
+    'chain': 'sol',
+    'addresses': [tokenAddress]
+  };
+
+  try {
+    final response = await dio.post(
+      url,
+      queryParameters: params,
+      options: Options(headers: headers),
+      data: data,
+    );
+    return TokenInfo.fromJson(response.data['data'][0]);
+  } catch (e) {
+    print('Error: $e');
+  }
+  return null;
 }
 
 Future<List<dynamic>> fetchTokensTop200() async {

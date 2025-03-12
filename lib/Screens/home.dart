@@ -5,7 +5,6 @@ import 'dart:math';
 import 'dart:io';
 
 import 'package:binanse_notification/Screens/token_monitor_page.dart';
-import 'package:intl/intl.dart';
 
 import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/cupertino.dart';
@@ -15,7 +14,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:dio/dio.dart';
 
 import '../const.dart';
 import '../model/chart.dart';
@@ -54,10 +52,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChartMain;
-  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
-  bool _isMonitoringBinance = false,
-      _isMonitoringOKX = false,
-      _isMonitoringHuobi = false;
+  DateTime? _lastMessageTimeBinance, _lastMessageTimeHuobi;
+  bool _isMonitoringBinance = false, _isMonitoringHuobi = false;
   bool isRefresh = true;
 
   final _chartKey = GlobalKey();
@@ -69,6 +65,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool _isTokenSent(String tokenAddress) {
     return _sentTokens.contains(tokenAddress);
   }
+
+  WebSocketChannel? channel;
 
   Future<void> _startTimer() async {
     Timer.periodic(Duration(seconds: 1), (_) {
@@ -85,64 +83,62 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     coinsListHuobi = [];
     coinsListForSelect = [];
     itemChartMain = [];
-    // _fetchCoinData();
-    // _loadPriceChangeThreshold();
-    // _startTimer();
+    _fetchCoinData();
+    _loadPriceChangeThreshold();
+    _startTimer();
   }
 
   Future<void> _fetchAndUpdateTokens() async {
     try {
       final tokens = await fetchTokensTop200();
-      if (mounted) {
-        final currentTimeInSeconds =
-            DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final currentTimeInSeconds =
+          DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-        final minTokenAgeInSeconds = 0 * 60;
-        final maxTokenAgeInSeconds = 240 * 60;
+      final minTokenAgeInSeconds = 0 * 60;
+      final maxTokenAgeInSeconds = 240 * 60;
 
-        final sortedTokens = tokens.where((token) {
-          final marketCap = parseDouble(token['marketCap']);
-          final creationTime = token['createdAt'] as int;
-          final tokenAgeInSeconds = currentTimeInSeconds - creationTime;
-          final isOldEnough = tokenAgeInSeconds >= minTokenAgeInSeconds;
-          final isNotTooOld = tokenAgeInSeconds <= maxTokenAgeInSeconds;
-          final holders = parseInt(token['holders']);
+      final sortedTokens = tokens.where((token) {
+        final marketCap = parseDouble(token['marketCap']);
+        final creationTime = token['createdAt'] as int;
+        final tokenAgeInSeconds = currentTimeInSeconds - creationTime;
+        final isOldEnough = tokenAgeInSeconds >= minTokenAgeInSeconds;
+        final isNotTooOld = tokenAgeInSeconds <= maxTokenAgeInSeconds;
+        final holders = parseInt(token['holders']);
 
-          final liquidity = parseDouble(token['liquidity']);
-          final txnCount24 = parseInt(token['txnCount24']);
-          final uniqueBuys24 = parseInt(token['uniqueBuys24']);
-          final uniqueSells24 = parseInt(token['uniqueSells24']);
-          final volume24 = parseDouble(token['volume24']);
-          final change24 = parseDouble(token['change24']);
+        final liquidity = parseDouble(token['liquidity']);
+        final txnCount24 = parseInt(token['txnCount24']);
+        final uniqueBuys24 = parseInt(token['uniqueBuys24']);
+        final uniqueSells24 = parseInt(token['uniqueSells24']);
+        final volume24 = parseDouble(token['volume24']);
+        final change24 = parseDouble(token['change24']);
 
-          final isPriceChangeReasonable = change24.abs() < 100;
-          final hasEnoughVolume = volume24 > 50000;
-          final hasEnoughUniqueParticipants =
-              uniqueBuys24 > 130 && uniqueSells24 > 100;
-          final hasEnoughTransactions = txnCount24 > 100;
-          final hasEnoughLiquidity = liquidity > 6000;
-          final hasEnoughHolders = holders >= 400;
+        final isPriceChangeReasonable = change24.abs() < 100;
+        final hasEnoughVolume = volume24 > 60000;
+        final hasEnoughUniqueParticipants =
+            uniqueBuys24 > 130 && uniqueSells24 > 100;
+        final hasEnoughTransactions = txnCount24 > 100;
+        final hasEnoughLiquidity = liquidity > 6000;
+        final hasEnoughHolders = holders >= 400;
 
-          final hasEnoughMarketCap =
-              marketCap >= 10000 && marketCap <= 1_000_000 ||
-                  marketCap >= 100000 && marketCap < 3_000_000 ||
-                  marketCap >= 3000000 && marketCap < 5_000_000 ||
-                  marketCap >= 5000000 && marketCap < 20_000_000 ||
-                  marketCap >= 10000000 && marketCap < 50_000_000;
+        final hasEnoughMarketCap =
+            marketCap >= 70000 && marketCap <= 1_000_000 ||
+                marketCap >= 100000 && marketCap < 3_000_000 ||
+                marketCap >= 3000000 && marketCap < 5_000_000 ||
+                marketCap >= 5000000 && marketCap < 20_000_000 ||
+                marketCap >= 10000000 && marketCap < 50_000_000;
 
-          return hasEnoughMarketCap &&
-              isOldEnough &&
-              isNotTooOld &&
-              hasEnoughHolders &&
-              hasEnoughLiquidity &&
-              hasEnoughTransactions &&
-              hasEnoughUniqueParticipants &&
-              hasEnoughVolume;
-        }).toList();
+        return hasEnoughMarketCap &&
+            isOldEnough &&
+            isNotTooOld &&
+            hasEnoughHolders &&
+            hasEnoughLiquidity &&
+            hasEnoughTransactions &&
+            hasEnoughUniqueParticipants &&
+            hasEnoughVolume;
+      }).toList();
 
-        _checkForNewTokens(sortedTokens);
-        _previousTokens = List.from(sortedTokens);
-      }
+      _checkForNewTokens(sortedTokens);
+      _previousTokens = List.from(sortedTokens);
     } catch (e) {
       print("Error fetching tokens: $e");
     }
@@ -164,35 +160,57 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     for (var token in newTokens) {
       final tokenAddress = token['token']['address'];
-      final marketCapAndAge = await fetchDataCoin(tokenAddress);
-      final marketCap = double.parse(marketCapAndAge.marketCap);
+      final marketCapAndAge = await fetchTokenInfo(tokenAddress);
 
-      if (marketCapAndAge.age <= 300) {
-        if (marketCapAndAge.age <= 5 && marketCap <= 500000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 15 && marketCap <= 1000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 30 && marketCap <= 3000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 50 && marketCap <= 5000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 100 && marketCap <= 10000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 200 && marketCap <= 20000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 240 && marketCap <= 30000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-        } else if (marketCapAndAge.age <= 300 && marketCap <= 50000000) {
-          _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+      final marketCap = marketCapAndAge?.marketCap ?? 0;
+
+      if (marketCapAndAge != null) {
+        final int timestamp = marketCapAndAge.creationTimestamp != 0
+            ? marketCapAndAge.creationTimestamp
+            : marketCapAndAge.openTimestamp;
+
+        final int age =
+            DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+        if (age <= 240) {
+          if (age <= 3 && marketCap <= 30000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 5 && marketCap <= 50000) {
+
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 15 && marketCap <= 1000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 30 && marketCap <= 3000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 50 && marketCap <= 5000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 100 && marketCap <= 10000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 200 && marketCap <= 20000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 240 && marketCap <= 30000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          } else if (age <= 300 && marketCap <= 50000000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+          }
         }
       }
     }
   }
 
   Future<void> _notifyAndSaveToken(
-      token, MarketCapAndAge marketCapAndAge, tokenAddress) async {
+      token, TokenInfo marketCapAndAge, tokenAddress) async {
     final scamProbability = await analyzeTokenWithAI(token, marketCapAndAge);
-    if (int.parse(scamProbability) <= 70) {
+    if (int.parse(scamProbability) <= 60) {
+      final int timestamp = marketCapAndAge.creationTimestamp != 0
+          ? marketCapAndAge.creationTimestamp
+          : marketCapAndAge.openTimestamp;
+      final int age =
+          DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+      print(age);
+      print(marketCapAndAge.marketCap);
+      print(marketCapAndAge.name);
+      print(marketCapAndAge.address);
+
       AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
       sendTelegramNotificationMemCoins(token, scamProbability, marketCapAndAge);
       _sentTokens.add(tokenAddress);
@@ -460,7 +478,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final price = double.parse(data['data'][0]['last']);
     final timestamp = DateTime.now();
 
-    _lastMessageTimeOKX = timestamp;
     _storePrice(symbol, price, timestamp, ExchangeType.okx);
     _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
     _updateCoinsList(symbol, price, ExchangeType.okx);
@@ -578,9 +595,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     double adjustedThreshold = baseThreshold;
 
     if (lowVolatilityCrypto.contains(symbol)) {
-      adjustedThreshold = baseThreshold * 0.40;
+      adjustedThreshold = baseThreshold * 0.3;
     } else if (mediumVolatilityCrypto.contains(symbol)) {
-      adjustedThreshold = baseThreshold * 0.70;
+      adjustedThreshold = baseThreshold * 0.65;
     }
 
     final timeDifference = timestamp.difference(oldPriceData['timestamp']);

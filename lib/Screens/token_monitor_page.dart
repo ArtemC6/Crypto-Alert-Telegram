@@ -1,76 +1,59 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:web_socket_channel/io.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Pump.fun Token Monitor',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const TokenPriceMonitorScreen(),
-    );
-  }
-}
+import '../const.dart';
+import '../model/token_model.dart';
+import '../services/api.dart';
+import '../utils.dart';
 
 class TokenPriceMonitorScreen extends StatefulWidget {
   const TokenPriceMonitorScreen({super.key});
 
   @override
-  _TokenPriceMonitorScreenState createState() => _TokenPriceMonitorScreenState();
+  _TokenPriceMonitorScreenState createState() =>
+      _TokenPriceMonitorScreenState();
 }
 
 class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
   final TextEditingController _tokenMintController = TextEditingController();
-  WebSocketChannel? _channel;
   bool _isMonitoring = false;
   String _status = 'Disconnected';
-  String _tokenName = 'N/A';
-  String _tokenSymbol = 'N/A';
-  String _tokenPrice = 'N/A';
-  String _marketCap = 'N/A';
-  String _lastTradeAmount = 'N/A';
-  String _lastTradeTimestamp = 'N/A';
-  bool _lastTradeIsBuy = false;
-  double _solPrice = 121.0;
-  Timer? _pingTimer;
-  Timer? _reconnectTimer;
-  String? _sid;
-  String? _subscribedMint;
-  int _reconnectAttempts = 0;
-  static const int _maxReconnectAttempts = 5;
+  double _lastNotifiedMarketCap = 0.0;
+  double _marketCap = 0.0;
+  double _changeThreshold = 30.0;
+  Timer? _monitoringTimer;
+  final Map<String, DateTime> _lastNotificationTimes = {};
+  final Set<String> _sentNotifications = {};
 
   @override
   void initState() {
     super.initState();
-    _connectWebSocket(); // Автоматическое подключение при запуске
+    _loadChangeThreshold();
   }
 
   @override
   void dispose() {
-    _cleanup();
     _tokenMintController.dispose();
+    _monitoringTimer?.cancel();
     super.dispose();
   }
 
-  void _cleanup() {
-    _pingTimer?.cancel();
-    _reconnectTimer?.cancel();
-    _channel?.sink.close();
+  Future<void> _loadChangeThreshold() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _changeThreshold = prefs.getDouble('changeThreshold') ?? 30.0;
+    });
   }
 
-  Future<void> _connectWebSocket() async {
+  Future<void> _saveChangeThreshold(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('changeThreshold', value);
+  }
+
+  Future<void> _startMonitoring() async {
     if (_tokenMintController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a token mint address')),
@@ -78,203 +61,254 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
       return;
     }
 
-    _subscribedMint = _tokenMintController.text.trim();
-    await _establishConnection();
-  }
-
-  Future<void> _establishConnection() async {
     setState(() {
       _isMonitoring = true;
-      _status = 'Connecting... (Attempt ${_reconnectAttempts + 1})';
+      _status = 'Monitoring...';
     });
 
-    try {
-      _channel = IOWebSocketChannel.connect(
-        Uri.parse('wss://frontend-api-v3.pump.fun/socket.io/?EIO=4&transport=websocket'),
-        headers: {
-          'Upgrade': 'websocket',
-          'Origin': 'https://pump.fun',
-          'Cache-Control': 'no-cache',
-          'Accept-Language': 'ru,en;q=0.9',
-          'Pragma': 'no-cache',
-          'Connection': 'Upgrade',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-          'Sec-WebSocket-Version': '13',
-          'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
-        },
-      );
-
-      _channel!.stream.listen(
-            (message) {
-          _handleWebSocketMessage(message);
-        },
-        onError: (error) {
-          print('WebSocket error: $error');
-          _handleDisconnect();
-        },
-        onDone: () {
-          print('WebSocket connection closed');
-          _handleDisconnect();
-        },
-        cancelOnError: true,
-      );
-
-      _channel?.sink.add('40');
-    } catch (e) {
-      print('Failed to connect to WebSocket: $e');
-      _handleDisconnect();
+    final initialTokenInfo =
+        await fetchTokenInfo(_tokenMintController.text.trim());
+    if (initialTokenInfo != null) {
+      _lastNotifiedMarketCap = initialTokenInfo.marketCap;
+      _marketCap = initialTokenInfo.marketCap;
+      _lastNotificationTimes[_tokenMintController.text] = DateTime.now();
     }
-  }
 
-  void _handleDisconnect() {
-    _cleanup();
-    if (_isMonitoring && _reconnectAttempts < _maxReconnectAttempts) {
-      _reconnectAttempts++;
-      final delay = Duration(seconds: pow(1, _reconnectAttempts).toInt()); // Увеличиваем задержку
-      setState(() {
-        _status = 'Disconnected. Reconnecting in ${delay.inSeconds}s... (Attempt $_reconnectAttempts)';
-      });
-      _reconnectTimer = Timer(delay, () {
-        _establishConnection();
-      });
-    } else if (_reconnectAttempts >= _maxReconnectAttempts) {
-      setState(() {
-        _status = 'Max reconnection attempts reached';
-        _isMonitoring = false;
-        _reconnectAttempts = 0;
-      });
-    }
-  }
+    _monitoringTimer =
+        Timer.periodic(const Duration(milliseconds: 1), (_) async {
+      final tokenAddress = _tokenMintController.text;
+      final tokenInfo = await fetchTokenInfo(tokenAddress);
 
-  void _startPing() {
-    _pingTimer = Timer.periodic(const Duration(seconds: 30), (timer) { // Увеличиваем интервал пинга
-      if (_channel != null && _isMonitoring) {
-        _channel?.sink.add('2');
-        print('Sent ping');
-      }
-    });
-  }
-
-  void _subscribeToTradeRoom() {
-    final mint = _subscribedMint!;
-    final joinMessage = '42["joinTradeRoom",{"mint":"$mint"}]';
-    _channel?.sink.add(joinMessage);
-    setState(() {
-      _status = 'Subscribed to trade room for mint: $mint';
-    });
-    print('Subscribed to trade room: $mint');
-  }
-
-  void _handleWebSocketMessage(dynamic message) {
-    if (!mounted) return;
-
-    try {
-      if (message.startsWith('0')) {
-        final data = jsonDecode(message.substring(1));
-        _sid = data['sid'];
+      if (tokenInfo != null) {
+        final currentMarketCap = tokenInfo.marketCap;
         setState(() {
-          _status = 'Connected to WebSocket (SID: $_sid)';
-          _reconnectAttempts = 0; // Сброс попыток при успешном подключении
+          _marketCap = currentMarketCap;
         });
-        _startPing();
-        _subscribeToTradeRoom();
-      } else if (message.startsWith('2')) {
-        print('Received pong');
-      } else if (message.startsWith('42')) {
-        final jsonString = message.substring(2);
-        final data = jsonDecode(jsonString);
-        final event = data[0];
-        final tradeData = data[1];
 
-        if (tradeData['mint'] == _subscribedMint ||
-            event == 'tradeCreated:$_subscribedMint') {
-          setState(() {
-            _status = 'New trade received for $_subscribedMint';
-            _tokenName = tradeData['name'] ?? 'N/A';
-            _tokenSymbol = tradeData['symbol'] ?? 'N/A';
-            _marketCap = tradeData['usd_market_cap']?.toStringAsFixed(2) ?? 'N/A';
+        final marketCapChangePercentage =
+            ((currentMarketCap - _lastNotifiedMarketCap) /
+                    _lastNotifiedMarketCap) *
+                100;
 
-            final solAmount = tradeData['sol_amount'] / 1e9;
-            final tokenAmount = tradeData['token_amount'] / 1e6;
-            final priceInSol = solAmount / tokenAmount;
-            final priceInUsd = priceInSol * _solPrice;
-            _tokenPrice = priceInUsd.toStringAsFixed(6);
+        if (marketCapChangePercentage.abs() >= _changeThreshold) {
+          final lastNotificationTime = _lastNotificationTimes[tokenAddress];
+          final now = DateTime.now();
 
-            _lastTradeAmount =
-            '${solAmount.toStringAsFixed(4)} SOL (${(tradeData['token_amount'] / 1e6).toStringAsFixed(2)} $_tokenSymbol)';
-            _lastTradeTimestamp = DateTime.fromMillisecondsSinceEpoch(tradeData['timestamp'] * 1000).toLocal().toString();
-            _lastTradeIsBuy = tradeData['is_buy'];
-          });
-          print('Filtered trade data for $_subscribedMint: $tradeData');
+          final timeDifference = lastNotificationTime != null
+              ? now.difference(lastNotificationTime).inSeconds
+              : 0;
+          final isWithinFiveMinutes =
+              lastNotificationTime == null || timeDifference <= 120;
+
+          if (isWithinFiveMinutes &&
+              (lastNotificationTime == null ||
+                  now.difference(lastNotificationTime).inSeconds >= 5)) {
+            final notificationKey = '$tokenAddress-$currentMarketCap';
+            if (!_sentNotifications.contains(notificationKey)) {
+              _lastNotificationTimes[tokenAddress] = now;
+              _sentNotifications.add(notificationKey);
+              _lastNotifiedMarketCap = currentMarketCap;
+
+              await _sendTelegramNotification(tokenInfo,
+                  marketCapChangePercentage, now, lastNotificationTime);
+              setState(() {
+                _status =
+                    'Market cap changed by ${marketCapChangePercentage.toStringAsFixed(1)}%! Notification sent.';
+              });
+            }
+          }
         }
       }
-    } catch (e) {
-      print('Error processing WebSocket message: $e');
-      setState(() {
-        _status = 'Error processing message: $e';
-      });
-    }
+    });
   }
 
-  void _disconnectWebSocket() {
-    _cleanup();
-    setState(() {
-      _status = 'Disconnected';
-      _isMonitoring = false;
-      _reconnectAttempts = 0;
-    });
+  Future<void> _sendTelegramNotification(
+      TokenInfo tokenInfo,
+      double changePercentage,
+      DateTime currentTime,
+      DateTime? lastNotificationTime) async {
+    try {
+      final String symbol = tokenInfo.symbol;
+      final String name = tokenInfo.name;
+      final String? imageUrl =
+          tokenInfo.logo.isNotEmpty ? tokenInfo.logo : null;
+      final String tokenAddress = tokenInfo.address;
+
+      final int timestamp = tokenInfo.creationTimestamp != 0
+          ? tokenInfo.creationTimestamp
+          : tokenInfo.openTimestamp;
+      final int age = DateTime.now()
+          .difference(DateTime.fromMillisecondsSinceEpoch(timestamp * 1000))
+          .inMinutes;
+
+      final Map<String, String> socialLinks = {};
+      final String? discordLink = socialLinks['discord'];
+      final String? telegramLink = socialLinks['telegram'];
+      final String? twitterLink = socialLinks['twitter'];
+      final String? websiteLink = socialLinks['website'];
+
+      String socialLinksString =
+          '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
+
+      if (discordLink?.isNotEmpty ?? false) {
+        socialLinksString += '🔹 *Discord:* $discordLink\n';
+      }
+      if (telegramLink?.isNotEmpty ?? false) {
+        socialLinksString += '🔹 *Telegram:* $telegramLink\n';
+      }
+      if (twitterLink?.isNotEmpty ?? false) {
+        socialLinksString += '🔹 *Twitter:* $twitterLink\n';
+      }
+      if (websiteLink?.isNotEmpty ?? false) {
+        socialLinksString += '🔹 *Website:* $websiteLink\n';
+      }
+
+      final String changeDirection = changePercentage > 0 ? 'Up' : 'Down';
+      final String directionIndicator = changePercentage > 0 ? '📈' : '📉';
+
+      final String timeSinceLastChange = lastNotificationTime != null
+          ? formatDuration(currentTime.difference(lastNotificationTime))
+          : 'initial change';
+
+      final String caption = '''
+*Token Info: $name ($symbol)* 🚀
+
+🔹 *Changed $changeDirection ${changePercentage.abs().toStringAsFixed(1)}% in $timeSinceLastChange!* $directionIndicator
+🔹 *Market Cap:* \$${formatMarketCap(tokenInfo.marketCap.toString())}
+🔹 *Age:* ${formatAge(age)}
+🔹 *Address:* `$tokenAddress`
+
+$socialLinksString
+
+'''
+          .trim();
+
+      final String url =
+          'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+      final String messageUrl =
+          'https://api.telegram.org/bot$telegramBotToken/sendMessage';
+
+      http.Response response;
+
+      if (imageUrl?.isNotEmpty ?? false) {
+        final imageResponse = await http.get(Uri.parse(imageUrl!)).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => throw Exception("Timeout loading image"),
+            );
+
+        if (imageResponse.statusCode == 200 &&
+            imageResponse.bodyBytes.isNotEmpty) {
+          var request = http.MultipartRequest('POST', Uri.parse(url))
+            ..fields['chat_id'] = chatId
+            ..fields['caption'] = caption
+            ..fields['parse_mode'] = 'Markdown'
+            ..files.add(http.MultipartFile.fromBytes(
+              'photo',
+              imageResponse.bodyBytes,
+              filename: 'token_$symbol.png',
+            ));
+
+          final streamedResponse = await request.send().timeout(
+                const Duration(seconds: 10),
+                onTimeout: () => throw Exception("Timeout sending photo"),
+              );
+          response = await http.Response.fromStream(streamedResponse);
+
+          if (response.statusCode != 200) {
+            print(
+                "Ошибка отправки фото в Telegram: ${response.statusCode}, ${response.body}");
+          }
+        } else {
+          print(
+              "Не удалось загрузить изображение: ${imageResponse.statusCode}, размер: ${imageResponse.bodyBytes.length}");
+          response = await http.post(
+            Uri.parse(messageUrl),
+            body: {
+              'chat_id': chatId,
+              'text': caption,
+              'parse_mode': 'Markdown',
+            },
+          );
+        }
+      } else {
+        response = await http.post(
+          Uri.parse(messageUrl),
+          body: {
+            'chat_id': chatId,
+            'text': caption,
+            'parse_mode': 'Markdown',
+          },
+        );
+      }
+
+      if (response.statusCode == 200) {
+        print('Notification sent successfully');
+      } else {
+        print(
+            "Ошибка отправки сообщения в Telegram: ${response.statusCode}, ${response.body}");
+      }
+    } catch (e) {
+      print("Ошибка при отправке уведомления в Telegram: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pump.fun Token Monitor'),
+        title: const Text('Token Price Monitor'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _tokenMintController,
-                decoration: const InputDecoration(
-                  labelText: 'Token Mint Address',
-                  hintText: 'Enter the token mint address (e.g., FCSjDJ1b2wMz286vCrDrJMS7Z8MhU7L183qewRf7pump)',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _changeThreshold,
+                    min: 5.0,
+                    max: 100.0,
+                    divisions: 95,
+                    label: '${_changeThreshold.toStringAsFixed(1)}%',
+                    onChanged: (value) {
+                      setState(() {
+                        _changeThreshold = value;
+                      });
+                      _saveChangeThreshold(value);
+                    },
+                  ),
                 ),
+                const SizedBox(width: 16.0),
+                Text(
+                  'Change: ${_changeThreshold.toStringAsFixed(1)}%',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+            TextField(
+              controller: _tokenMintController,
+              decoration: const InputDecoration(
+                labelText: 'Token Mint Address',
+                hintText: 'Enter the token mint address',
               ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isMonitoring ? null : _connectWebSocket,
-                    child: const Text('Start Monitoring'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _isMonitoring ? _disconnectWebSocket : null,
-                    child: const Text('Stop Monitoring'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text('Status: $_status', style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 20),
-              Text('Token Info:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Name: $_tokenName'),
-              Text('Symbol: $_tokenSymbol'),
-              Text('Price: \$$_tokenPrice USD'),
-              Text('Market Cap: \$$_marketCap USD'),
-              const SizedBox(height: 20),
-              Text('Last Trade:', style: Theme.of(context).textTheme.titleLarge),
-              Text('Amount: $_lastTradeAmount'),
-              Text('Type: ${_lastTradeIsBuy ? 'Buy' : 'Sell'}'),
-              Text('Timestamp: $_lastTradeTimestamp'),
-            ],
-          ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _isMonitoring ? null : _startMonitoring,
+              child: const Text('Start Monitoring'),
+            ),
+            const SizedBox(height: 20),
+            Text('Status: $_status',
+                style: Theme.of(context).textTheme.bodyMedium),
+            Text('Market Cap: ${formatMarketCap(_marketCap.toString())}',
+                style: Theme.of(context).textTheme.bodyMedium),
+          ],
         ),
       ),
     );
   }
 }
+
+

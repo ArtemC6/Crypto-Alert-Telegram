@@ -5,6 +5,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
 
+
+DateTime getDateTime(int timestamp) {
+  return DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+}
+
 Future<Uint8List?> captureChart(GlobalKey chartKey) async {
   try {
     RenderRepaintBoundary boundary =
@@ -104,4 +109,16 @@ int parseInt(dynamic value) {
     return value.toInt();
   }
   return 0;
+}
+
+String formatDuration(Duration duration) {
+  if (duration.inDays >= 1) {
+    return '${duration.inDays} days';
+  } else if (duration.inHours >= 1) {
+    return '${duration.inHours} hours';
+  } else if (duration.inMinutes >= 1) {
+    return '${duration.inMinutes} minutes';
+  } else {
+    return '${duration.inSeconds} seconds';
+  }
 }
