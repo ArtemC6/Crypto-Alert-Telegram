@@ -45,6 +45,31 @@ String formatAge(int minutes) {
   }
 }
 
+String formatAgeSeconds(int seconds) {
+  if (seconds < 60) {
+    return "$seconds сек";
+  } else if (seconds < 3600) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (remainingSeconds == 0) {
+      return "$minutes мин";
+    } else {
+      return "$minutes мин $remainingSeconds сек";
+    }
+  } else {
+    final hours = seconds ~/ 3600;
+    final remainingMinutes = (seconds % 3600) ~/ 60;
+    final remainingSeconds = seconds % 60;
+    if (remainingMinutes == 0 && remainingSeconds == 0) {
+      return "$hours ч";
+    } else if (remainingSeconds == 0) {
+      return "$hours ч $remainingMinutes мин";
+    } else {
+      return "$hours ч $remainingMinutes мин $remainingSeconds сек";
+    }
+  }
+}
+
 String calculateTokenAge(int createdAt) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final ageInSeconds = now - createdAt;

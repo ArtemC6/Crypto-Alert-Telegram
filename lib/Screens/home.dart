@@ -4,25 +4,24 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:io';
 
-import 'package:binanse_notification/Screens/token_monitor_page.dart';
-
-import 'package:binanse_notification/Screens/select_token.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:audioplayers/audioplayers.dart';
 
+import 'select_token.dart';
+import 'token_monitor_page.dart';
 import '../const.dart';
 import '../model/chart.dart';
 import '../model/token_model.dart';
 import '../services/api.dart';
 import '../services/storage.dart';
-
 import '../utils.dart';
-import 'package:audioplayers/audioplayers.dart';
 
 enum ExchangeType { binanceFutures, okx, huobi }
 
@@ -52,9 +51,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final Map<String, DateTime> _lastNotificationTimes = {};
   late final StorageService _storageService;
   List<ChartModel>? itemChartMain;
-  DateTime? _lastMessageTimeBinance, _lastMessageTimeHuobi;
-  bool _isMonitoringBinance = false, _isMonitoringHuobi = false;
+  DateTime? _lastMessageTimeBinance, _lastMessageTimeOKX, _lastMessageTimeHuobi;
+  bool _isMonitoringBinance = false,
+      _isMonitoringOKX = false,
+      _isMonitoringHuobi = false;
   bool isRefresh = true;
+  bool isScreen = false;
 
   final _chartKey = GlobalKey();
 
@@ -62,17 +64,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   List<dynamic> _saveTokens = [];
   final Set<String> _sentTokens = {};
 
-  bool _isTokenSent(String tokenAddress) {
-    return _sentTokens.contains(tokenAddress);
-  }
-
-  WebSocketChannel? channel;
-
-  Future<void> _startTimer() async {
-    Timer.periodic(Duration(seconds: 1), (_) {
-      _fetchAndUpdateTokens();
-    });
-  }
+  Timer? _timer;
 
   @override
   void initState() {
@@ -83,9 +75,28 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     coinsListHuobi = [];
     coinsListForSelect = [];
     itemChartMain = [];
-    _fetchCoinData();
-    _loadPriceChangeThreshold();
-    _startTimer();
+    _loadScreen();
+  }
+
+  void _loadScreen() async {
+    priceChangeThreshold = await _storageService.loadPriceChangeThreshold();
+    isScreen = await _storageService.loadSelectedScreen();
+    setState(() => priceChangeThreshold = priceChangeThreshold);
+
+    if (!isScreen) {
+      _fetchCoinData();
+      _startTimer();
+    }
+  }
+
+  bool _isTokenSent(String tokenAddress) {
+    return _sentTokens.contains(tokenAddress);
+  }
+
+  Future<void> _startTimer() async {
+    _timer = Timer.periodic(Duration(seconds: 2), (_) {
+      _fetchAndUpdateTokens();
+    });
   }
 
   Future<void> _fetchAndUpdateTokens() async {
@@ -175,7 +186,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           if (age <= 3 && marketCap <= 30000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
           } else if (age <= 5 && marketCap <= 50000) {
-
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
           } else if (age <= 15 && marketCap <= 1000000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
@@ -220,16 +230,62 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> _monitorBinanceConnection() async {
     _isMonitoringBinance = true;
-    while (_isMonitoringBinance) {
+    int reconnectAttempts = 0;
+    const maxAttempts = 5;
+
+    while (_isMonitoringBinance && mounted) {
       await Future.delayed(Duration(seconds: 5));
       if (_lastMessageTimeBinance != null &&
           DateTime.now().difference(_lastMessageTimeBinance!).inSeconds >= 30) {
-        print('No data received from Binance for 30 seconds. Reconnecting...');
+        print(
+            'No data from Binance for 30s. Reconnecting ($reconnectAttempts/$maxAttempts)...');
+        await _channelSpotBinanceFeatured?.sink.close();
         await _connectWebSocketBinance();
-        break;
+
+        reconnectAttempts++;
+        if (reconnectAttempts >= maxAttempts) {
+          print('Max attempts reached for Binance. Waiting 1 minute...');
+          await Future.delayed(Duration(minutes: 1));
+          reconnectAttempts = 0;
+        } else {
+          await Future.delayed(
+              Duration(seconds: pow(2, reconnectAttempts).toInt()));
+        }
+      } else {
+        reconnectAttempts = 0;
       }
     }
     _isMonitoringBinance = false;
+  }
+
+  Future<void> _monitorOKXConnection() async {
+    _isMonitoringOKX = true;
+    int reconnectAttempts = 0;
+    const maxAttempts = 5;
+
+    while (_isMonitoringOKX && mounted) {
+      await Future.delayed(Duration(seconds: 5));
+      if (_lastMessageTimeOKX != null &&
+          DateTime.now().difference(_lastMessageTimeOKX!).inSeconds >= 30) {
+        print(
+            'No data from OKX for 30s. Reconnecting ($reconnectAttempts/$maxAttempts)...');
+        await _okxChannel?.sink.close();
+        await _connectWebSocketOKX();
+
+        reconnectAttempts++;
+        if (reconnectAttempts >= maxAttempts) {
+          print('Max attempts reached for OKX. Waiting 1 minute...');
+          await Future.delayed(Duration(minutes: 1));
+          reconnectAttempts = 0;
+        } else {
+          await Future.delayed(
+              Duration(seconds: pow(2, reconnectAttempts).toInt()));
+        }
+      } else {
+        reconnectAttempts = 0;
+      }
+    }
+    _isMonitoringOKX = false;
   }
 
   Future<void> _monitorHuobiConnection() async {
@@ -237,15 +293,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     int reconnectAttempts = 0;
     const maxAttempts = 5;
 
-    while (_isMonitoringHuobi) {
+    while (_isMonitoringHuobi && mounted) {
       await Future.delayed(Duration(seconds: 5));
       if (_lastMessageTimeHuobi != null &&
           DateTime.now().difference(_lastMessageTimeHuobi!).inSeconds >= 30) {
+        print(
+            'No data from Huobi for 30s. Reconnecting ($reconnectAttempts/$maxAttempts)...');
         await _huobiChannel?.sink.close();
         await _connectWebSocketHuobi();
 
         reconnectAttempts++;
         if (reconnectAttempts >= maxAttempts) {
+          print('Max attempts reached for Huobi. Waiting 1 minute...');
           await Future.delayed(Duration(minutes: 1));
           reconnectAttempts = 0;
         } else {
@@ -316,11 +375,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   void _loadSelectedCoins() async {
     selectedCoins.addAll(cryptoList);
-
     coinsListForSelect = coinsListForSelect.toSet().toList();
     setState(() => selectedCoins = selectedCoins.toSet().toList());
-    // selectedCoins = await _storageService.loadSelectedCoins();
-
     _connectWebSocketBinance();
     _connectWebSocketOKX();
     _connectWebSocketHuobi();
@@ -359,16 +415,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _processMessageBinance,
       onDone: () =>
           Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
-      onError: (error) =>
-          Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance),
+      onError: (error) {
+        print('Binance WebSocket error: $error');
+        Future.delayed(const Duration(seconds: 5), _connectWebSocketBinance);
+      },
       cancelOnError: true,
     );
 
     _lastMessageTimeBinance = DateTime.now();
-
-    if (!_isMonitoringBinance) {
-      _monitorBinanceConnection();
-    }
+    if (!_isMonitoringBinance) _monitorBinanceConnection();
   }
 
   Future<void> _connectWebSocketOKX() async {
@@ -397,21 +452,24 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     _okxChannel!.stream.listen(
       _processMessageOKX,
-      onDone: () {
-        Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
-      },
+      onDone: () =>
+          Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX),
       onError: (error) {
+        print('OKX WebSocket error: $error');
         Future.delayed(const Duration(seconds: 5), _connectWebSocketOKX);
       },
       cancelOnError: true,
     );
+
+    _lastMessageTimeOKX = DateTime.now();
+    if (!_isMonitoringOKX) _monitorOKXConnection();
   }
 
   Future<void> _connectWebSocketHuobi() async {
     await _huobiChannel?.sink.close();
 
     if (selectedCoins.isEmpty) {
-      print('No coins selected for Huobi, connection not established');
+      print('No coins selected for Huobi');
       return;
     }
 
@@ -433,21 +491,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
       _huobiChannel!.stream.listen(
         _processMessageHuobi,
-        onDone: () {
-          Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
-        },
+        onDone: () =>
+            Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi),
         onError: (error) {
+          print('Huobi WebSocket error: $error');
           Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
         },
         cancelOnError: false,
       );
 
       _lastMessageTimeHuobi = DateTime.now();
-
-      if (!_isMonitoringHuobi) {
-        _monitorHuobiConnection();
-      }
+      if (!_isMonitoringHuobi) _monitorHuobiConnection();
     } catch (e) {
+      print('Huobi connection failed: $e');
       Future.delayed(Duration(seconds: 2), _connectWebSocketHuobi);
     }
   }
@@ -478,6 +534,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final price = double.parse(data['data'][0]['last']);
     final timestamp = DateTime.now();
 
+    _lastMessageTimeOKX = timestamp;
     _storePrice(symbol, price, timestamp, ExchangeType.okx);
     _checkPriceChange(symbol, price, timestamp, ExchangeType.okx);
     _updateCoinsList(symbol, price, ExchangeType.okx);
@@ -810,7 +867,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   Future<List<ChartModel>?> _fetchFromBybit(String symbol, int limit) async {
     try {
       final bybitResponse = await http.get(Uri.parse(
-          'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=5&limit=$limit'));
+          'https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=5&limit=$limit'));
       if (bybitResponse.statusCode == 200) {
         final jsonData = json.decode(bybitResponse.body);
         if (jsonData['result'] != null && jsonData['result']['list'] != null) {
@@ -899,14 +956,12 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
         );
       }
 
-      if (response.statusCode == 200) {
-      } else {
-        print("Failed to send notification to Telegram."
-            "Status code: ${response.statusCode}. "
-            "Response: ${response.body}");
+      if (response.statusCode != 200) {
+        print("Failed to send Telegram notification. "
+            "Status code: ${response.statusCode}, Response: ${response.body}");
       }
     } catch (e, stackTrace) {
-      print("Error sending notification to Telegram: $e");
+      print("Error sending Telegram notification: $e");
       print("Stack trace: $stackTrace");
     }
   }
@@ -925,11 +980,6 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
         ),
       ),
     );
-  }
-
-  void _loadPriceChangeThreshold() async {
-    priceChangeThreshold = await _storageService.loadPriceChangeThreshold();
-    setState(() => priceChangeThreshold = priceChangeThreshold);
   }
 
   void _savePriceChangeThreshold(double value) async {
@@ -966,8 +1016,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
               padding: const EdgeInsets.all(10),
               child: Row(
                 children: [
-                  Text(
-                      'Price change threshold: ${priceChangeThreshold.toStringAsFixed(1)}%'),
+                  Text('Price: ${priceChangeThreshold.toStringAsFixed(1)}%'),
                   Expanded(
                     child: Slider(
                       value: priceChangeThreshold,
@@ -980,6 +1029,14 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                         _savePriceChangeThreshold(value);
                       },
                     ),
+                  ),
+                  CupertinoSwitch(
+                    value: isScreen,
+                    onChanged: (bool value) {
+                      setState(() => isScreen = value);
+                      _storageService.saveSelectedScreen(value);
+                    },
+                    activeTrackColor: Colors.deepPurpleAccent,
                   ),
                 ],
               ),
@@ -997,14 +1054,13 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                           child: ElevatedButton(
                             onPressed: () {
                               setState(() => isHide = !isHide);
-
                               filteredCoinsBinance.clear();
                               filteredCoinsOKX.clear();
                               filteredCoinsHuobi.clear();
                             },
-                            child: Text(!isHide
+                            child: Text(isHide
                                 ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
-                                : 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'),
+                                : 'Show List'),
                           ),
                         ),
                       ],
@@ -1035,7 +1091,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                       Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
-                              builder: (context) => TokenPriceMonitorScreen()));
+                              builder: (context) => TokenPriceMonitorScreen(initialTokenAddress: '',)));
                     },
                     child: Icon(Icons.refresh, size: 18),
                   ),

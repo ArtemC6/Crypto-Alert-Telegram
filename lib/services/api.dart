@@ -262,8 +262,6 @@ Future<TokenInfo?> fetchTokenInfo(String tokenAddress) async {
     'accept': 'application/json, text/plain, */*',
     'accept-language': 'ru,en;q=0.9',
     'content-type': 'application/json',
-    'origin': 'https://gmgn.ai',
-    'priority': 'u=1, i',
     'referer': 'https://gmgn.ai/sol/token/$tokenAddress',
   };
   final params = {

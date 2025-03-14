@@ -49,7 +49,6 @@ dev_dependencies:
   permission_handler: ^11.4.0
   audioplayers: ^6.3.0
   graphql_flutter: ^5.1.2
-  cookie_jar: ^4.0.8
 
 
 

@@ -13,6 +13,16 @@ class StorageService {
     await prefs.setStringList('selectedCoins', coins);
   }
 
+  Future<bool> loadSelectedScreen() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('isScreen') ?? false;
+  }
+
+  Future<void> saveSelectedScreen(bool isScreen) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isScreen', isScreen);
+  }
+
   Future<double> loadPriceChangeThreshold() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     return prefs.getDouble('priceChangeThreshold') ?? 1.0;
