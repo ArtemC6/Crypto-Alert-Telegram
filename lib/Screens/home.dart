@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:io';
 
-import 'package:binanse_notification/Screens/pupm.fun.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -65,6 +64,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final List<dynamic> _saveTokens = [];
   final Set<String> _sentTokens = {};
 
+  late WebSocketChannel _channel;
+  final Map<String, Map<String, dynamic>> _pools = {};
+  final Set<String> _notifiedPoolIds = {};
 
   @override
   void initState() {
@@ -86,7 +88,191 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (!isScreen) {
       _fetchCoinData();
       _startTimer();
+      connectWebSocketMem();
     }
+  }
+
+  void connectWebSocketMem() {
+    _channel = WebSocketChannel.connect(
+      Uri.parse('wss://trench-stream.jup.ag/ws'),
+    );
+
+    _channel.sink.add(jsonEncode({"type": "subscribe:recent"}));
+    _channel.sink.add(jsonEncode({"type": "subscribe:pool", "pools": []}));
+    _channel.sink.add(jsonEncode({"type": "subscribe:txns", "assets": []}));
+
+    _channel.stream.listen(
+      (message) async {
+        final data = jsonDecode(message);
+        if (data['type'] == 'updates') {
+          for (var update in data['data']) {
+            if (update['type'] == 'update' && update['pool'] != null) {
+              final pool = update['pool'];
+              _pools[pool['id']] = pool;
+              if (passesFilters(pool) &&
+                  !_notifiedPoolIds.contains(pool['id'])) {
+                _notifiedPoolIds.add(pool['id']);
+
+                final baseAsset = pool['baseAsset'] ?? {};
+                final String tokenAddress = baseAsset['id'] ?? 'N/A';
+                final marketCapAndAge = await fetchTokenInfo(tokenAddress);
+
+                if (marketCapAndAge == null) {
+                  final int timestamp = marketCapAndAge!.creationTimestamp != 0
+                      ? marketCapAndAge.creationTimestamp
+                      : marketCapAndAge.openTimestamp;
+
+                  final int age = DateTime.now()
+                      .difference(getDateTime(timestamp))
+                      .inMinutes;
+
+                  if (age <= 60) {
+                    sendTelegramNotificationMem(pool);
+                  }
+                }
+              }
+            }
+          }
+        } else if (data['type'] == 'new') {
+          for (var newPool in data['data']) {
+            if (newPool['type'] == 'new' && newPool['pool'] != null) {
+              final pool = newPool['pool'];
+              _pools[pool['id']] = pool;
+              if (passesFilters(pool) &&
+                  !_notifiedPoolIds.contains(pool['id'])) {
+                _notifiedPoolIds.add(pool['id']);
+
+                final baseAsset = pool['baseAsset'] ?? {};
+                final String tokenAddress = baseAsset['id'] ?? 'N/A';
+                final marketCapAndAge = await fetchTokenInfo(tokenAddress);
+
+                if (marketCapAndAge == null) {
+                  final int timestamp = marketCapAndAge!.creationTimestamp != 0
+                      ? marketCapAndAge.creationTimestamp
+                      : marketCapAndAge.openTimestamp;
+
+                  final int age = DateTime.now()
+                      .difference(getDateTime(timestamp))
+                      .inMinutes;
+
+                  if (age <= 60) {
+                    sendTelegramNotificationMem(pool);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        _pools.removeWhere((id, pool) {
+          final baseAsset = pool['baseAsset'] ?? {};
+          final String createdAt =
+              pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
+          if (createdAt.isNotEmpty) {
+            final createdDate = DateTime.tryParse(createdAt);
+            if (createdDate != null) {
+              final ageInSeconds =
+                  DateTime.now().difference(createdDate).inMinutes;
+              return ageInSeconds > 600;
+            }
+          }
+          return false;
+        });
+        setState(() {});
+      },
+      onError: (error) => print('WebSocket error: $error'),
+      onDone: () {
+        print('WebSocket closed');
+        Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
+      },
+    );
+  }
+
+  bool passesFilters(Map<String, dynamic> pool) {
+    final baseAsset = pool['baseAsset'] ?? {};
+
+    final double marketCap =
+        (baseAsset['mcap'] ?? pool['mcap'] ?? 0).toDouble();
+    final double liquidity = (pool['liquidity'] ?? 0).toDouble();
+    final double volume24h = (pool['volume24h'] ?? 0).toDouble();
+    final int holders = (baseAsset['holderCount'] ?? 0) as int;
+    final String createdAt =
+        pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
+    final double bondingCurve = (pool['bondingCurve'] ?? 0).toDouble();
+    final double organicScore =
+        (baseAsset['organicScore'] ?? pool['organicScore'] ?? 0).toDouble();
+    final int organicBuyers24h =
+        (baseAsset['organicBuyers24h'] ?? pool['organicBuyers24h'] ?? 0) as int;
+
+    // Статистика
+    final stats5m = pool['baseAsset']['stats5m'] ?? {};
+    final stats24h = pool['baseAsset']['stats24h'] ?? {};
+
+    final double priceChange5m = (stats5m['priceChange'] ?? 0).toDouble();
+    final double buyVolume5m = (stats5m['buyVolume'] ?? 0).toDouble();
+    final double sellVolume5m = (stats5m['sellVolume'] ?? 0).toDouble();
+    final int numBuys5m = (stats5m['numBuys'] ?? 0) as int;
+    final int numSells5m = (stats5m['numSells'] ?? 0) as int;
+    final int numTraders5m = (stats5m['numTraders'] ?? 0) as int;
+    final int numBuyers5m = (stats5m['numBuyers'] ?? 0) as int;
+    final int numSellers5m = (stats5m['numSellers'] ?? 0) as int;
+
+    final double buyVolume24h = (stats24h['buyVolume'] ?? 0).toDouble();
+    final double sellVolume24h = (stats24h['sellVolume'] ?? 0).toDouble();
+    final int numBuys24h = (stats24h['numBuys'] ?? 0) as int;
+    final int numSells24h = (stats24h['numSells'] ?? 0) as int;
+    final int numTraders24h = (stats24h['numTraders'] ?? 0) as int;
+    final int numBuyers24h = (stats24h['numBuyers'] ?? 0) as int;
+    final int numSellers24h = (stats24h['numSellers'] ?? 0) as int;
+
+    final audit = baseAsset['audit'] ?? {};
+    final bool mintAuthorityDisabled = audit['mintAuthorityDisabled'] ?? false;
+    final bool freezeAuthorityDisabled =
+        audit['freezeAuthorityDisabled'] ?? false;
+    final double topHoldersPercentage =
+        (audit['topHoldersPercentage'] ?? 0).toDouble();
+
+    int age = 0;
+    if (createdAt.isNotEmpty) {
+      final createdDate = DateTime.tryParse(createdAt);
+      if (createdDate != null) {
+        age = DateTime.now().difference(createdDate).inSeconds;
+      }
+    }
+
+    final bool hasEnoughMarketCap = marketCap >= 6000 && marketCap <= 300000;
+    final bool hasEnoughLiquidity = liquidity >= 5000;
+    final bool hasEnoughVolume24h = volume24h >= 40000;
+    final bool hasEnoughHolders = holders >= 200;
+    final bool isNotTooOld = age <= 2000;
+
+    final bool hasHighVolume24h =
+        buyVolume24h >= 7000 || sellVolume24h >= 7000; // Высокий объем торгов
+    final bool hasEnoughTraders24h =
+        numTraders24h >= 60; // Достаточно трейдеров за 24 часа
+    final bool hasMoreBuysThanSells24h =
+        numBuys24h > numSells24h; // Покупок больше, чем продаж
+    final bool hasLowTopHoldersPercentage =
+        topHoldersPercentage <= 25; // Низкая концентрация у крупных держателей
+
+    final bool hasGoodOrganicScore =
+        organicScore >= 50; // Хороший органический рост
+    final bool hasEnoughOrganicBuyers =
+        organicBuyers24h >= 50; // Достаточно органических покупателей
+
+    return hasEnoughMarketCap &&
+        hasEnoughLiquidity &&
+        hasGoodOrganicScore &&
+        hasEnoughOrganicBuyers &&
+        hasEnoughVolume24h &&
+        hasEnoughHolders &&
+        freezeAuthorityDisabled &&
+        mintAuthorityDisabled &&
+        hasLowTopHoldersPercentage &&
+        isNotTooOld &&
+        hasMoreBuysThanSells24h &&
+        hasEnoughTraders24h &&
+        hasHighVolume24h;
   }
 
   bool _isTokenSent(String tokenAddress) {
@@ -121,15 +307,13 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final uniqueBuys24 = parseInt(token['uniqueBuys24']);
         final uniqueSells24 = parseInt(token['uniqueSells24']);
         final volume24 = parseDouble(token['volume24']);
-        final change24 = parseDouble(token['change24']);
 
-        final isPriceChangeReasonable = change24.abs() < 100;
-        final hasEnoughVolume = volume24 > 70000;
+        final hasEnoughVolume = volume24 > 9000;
         final hasEnoughUniqueParticipants =
-            uniqueBuys24 > 230 && uniqueSells24 > 140;
-        final hasEnoughTransactions = txnCount24 > 200;
-        final hasEnoughLiquidity = liquidity > 6000;
-        final hasEnoughHolders = holders >= 450;
+            uniqueBuys24 > 290 && uniqueSells24 > 190;
+        final hasEnoughTransactions = txnCount24 > 250;
+        final hasEnoughLiquidity = liquidity > 7000;
+        final hasEnoughHolders = holders >= 500;
 
         final hasEnoughMarketCap =
             marketCap >= 70000 && marketCap <= 1_000_000 ||
@@ -187,19 +371,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
           } else if (age <= 5 && marketCap <= 50000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 15 && marketCap <= 1000000) {
+          } else if (age <= 15 && marketCap <= 100000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 30 && marketCap <= 3000000) {
+          } else if (age <= 30 && marketCap <= 150000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 50 && marketCap <= 5000000) {
+          } else if (age <= 50 && marketCap <= 200000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 100 && marketCap <= 10000000) {
+          } else if (age <= 100 && marketCap <= 500000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 200 && marketCap <= 20000000) {
+          } else if (age <= 200 && marketCap <= 1000000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 240 && marketCap <= 30000000) {
+          } else if (age <= 240 && marketCap <= 2000000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 300 && marketCap <= 50000000) {
+          } else if (age <= 300 && marketCap <= 3000000) {
             _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
           }
         }
@@ -1081,7 +1265,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                       Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
-                              builder: (context) => PoolListScreen()));
+                              builder: (context) => TokenPriceMonitorScreen()));
                     },
                     child: Icon(Icons.refresh, size: 18),
                   ),

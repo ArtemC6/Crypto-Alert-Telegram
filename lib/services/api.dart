@@ -6,6 +6,147 @@ import '../const.dart';
 import '../model/token_model.dart';
 import '../utils.dart';
 
+import 'package:audioplayers/audioplayers.dart';
+
+
+Future<void> sendTelegramNotificationMem(Map<String, dynamic> pool) async {
+  try {
+    final percent = await analyzeTokenWithAIMem(pool);
+    print(percent);
+    if (percent >= 70) return;
+    AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+
+
+    final baseAsset = pool['baseAsset'] ?? {};
+    final stats5m = pool['baseAsset']['stats5m'] ?? {};
+
+    final double priceChange5m = (stats5m['priceChange'] ?? 0).toDouble();
+    final double buyVolume5m = (stats5m['buyVolume'] ?? 0).toDouble();
+    final double sellVolume5m = (stats5m['sellVolume'] ?? 0).toDouble();
+    final int numBuys5m = (stats5m['numBuys'] ?? 0) as int;
+    final int numSells5m = (stats5m['numSells'] ?? 0) as int;
+    final int numTraders5m = (stats5m['numTraders'] ?? 0) as int;
+    final int numBuyers5m = (stats5m['numBuyers'] ?? 0) as int;
+    final int numSellers5m = (stats5m['numSellers'] ?? 0) as int;
+
+    final String symbol = baseAsset['symbol'] ?? 'Unknown';
+    final String name = baseAsset['name'] ?? 'Unknown';
+    final String liquidity = pool['liquidity']?.toStringAsFixed(2) ?? 'N/A';
+    final String? imageUrl = baseAsset['icon'];
+    final String tokenAddress = baseAsset['id'] ?? 'N/A';
+    final String marketCap = pool['mcap']?.toStringAsFixed(2) ??
+        baseAsset['mcap']?.toStringAsFixed(2) ??
+        'N/A';
+    final String volume24h = pool['volume24h']?.toStringAsFixed(2) ?? 'N/A';
+    final String holderCount = baseAsset['holderCount']?.toString() ?? 'N/A';
+    final String createdAt =
+        pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
+
+
+
+    final double organicScore =
+    (baseAsset['organicScore'] ?? pool['organicScore'] ?? 0).toDouble();
+    final int organicBuyers24h =
+    (baseAsset['organicBuyers24h'] ?? pool['organicBuyers24h'] ?? 0) as int;
+
+
+    String socialLinksString =
+        '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
+
+    final audit = baseAsset['audit'] ?? {};
+    final double topHoldersPercentage =
+    (audit['topHoldersPercentage'] ?? 0).toDouble();
+
+    final String caption = '''
+*🔹$name* 🚀
+
+🔹 *Symbol:* $symbol : $percent%  
+🔹 *Market Cap:* ${formatMarketCapString(marketCap)}
+🔹 *Age:* ${formatTime(createdAt)}
+🔹 *Liquidity:* \$${formatMarketCapString(liquidity)}
+🔹 *24h Volume:* \$${formatMarketCapString(volume24h)}
+🔹 *Holders:* $holderCount
+
+🔹 *Top Holders Percentage:* ${topHoldersPercentage.toStringAsFixed(1)}%
+
+
+🔹 *priceChange5m:* $priceChange5m
+
+🔹 *buyVolume5m:* $buyVolume5m
+🔹 *sellVolume5m:* $sellVolume5m
+
+🔹 *numBuys5m:* $numBuys5m
+🔹 *numSells5m:* $numSells5m
+
+🔹 *numTraders5m:* $numTraders5m
+
+🔹 *numBuyers5m:* $numBuyers5m
+🔹 *numSellers5m:* $numSellers5m
+
+  
+
+🔹 *Token Address:* `$tokenAddress`
+
+$socialLinksString
+'''
+        .trim();
+
+    final String url =
+        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+    final String messageUrl =
+        'https://api.telegram.org/bot$telegramBotToken/sendMessage';
+
+    http.Response response;
+
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      final imageResponse = await http.get(Uri.parse(imageUrl));
+      if (imageResponse.statusCode == 200 &&
+          imageResponse.bodyBytes.isNotEmpty) {
+        var request = http.MultipartRequest('POST', Uri.parse(url))
+          ..fields['chat_id'] = chatId
+          ..fields['caption'] = caption
+          ..fields['parse_mode'] = 'Markdown'
+          ..files.add(http.MultipartFile.fromBytes(
+            'photo',
+            imageResponse.bodyBytes,
+            filename: 'pool_$symbol.png',
+          ));
+
+        final streamedResponse = await request.send();
+        response = await http.Response.fromStream(streamedResponse);
+      } else {
+        response = await http.post(
+          Uri.parse(messageUrl),
+          body: {
+            'chat_id': chatId,
+            'text': caption,
+            'parse_mode': 'Markdown',
+          },
+        );
+      }
+    } else {
+      response = await http.post(
+        Uri.parse(messageUrl),
+        body: {
+          'chat_id': chatId,
+          'text': caption,
+          'parse_mode': 'Markdown',
+        },
+      );
+    }
+
+    if (response.statusCode != 200) {
+      print(
+          "Failed to send Telegram notification: ${response.statusCode}, ${response.body}");
+    } else {
+      print("Notification sent successfully for token: $tokenAddress");
+    }
+  } catch (e) {
+    print("Error sending Telegram notification: $e");
+  }
+}
+
+
 Future<void> sendTelegramNotificationMemCoins(
     dynamic token, String scamProbability, TokenInfo marketCapAndAge) async {
   try {
