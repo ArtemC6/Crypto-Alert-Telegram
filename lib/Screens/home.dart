@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:math';
 import 'dart:io';
 
+import 'package:binanse_notification/Screens/pupm.fun.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -61,10 +62,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final _chartKey = GlobalKey();
 
   List<dynamic> _previousTokens = [];
-  List<dynamic> _saveTokens = [];
+  final List<dynamic> _saveTokens = [];
   final Set<String> _sentTokens = {};
 
-  Timer? _timer;
 
   @override
   void initState() {
@@ -94,7 +94,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _startTimer() async {
-    _timer = Timer.periodic(Duration(seconds: 2), (_) {
+    Timer.periodic(Duration(seconds: 3), (_) {
       _fetchAndUpdateTokens();
     });
   }
@@ -124,12 +124,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final change24 = parseDouble(token['change24']);
 
         final isPriceChangeReasonable = change24.abs() < 100;
-        final hasEnoughVolume = volume24 > 60000;
+        final hasEnoughVolume = volume24 > 70000;
         final hasEnoughUniqueParticipants =
-            uniqueBuys24 > 130 && uniqueSells24 > 100;
-        final hasEnoughTransactions = txnCount24 > 100;
+            uniqueBuys24 > 230 && uniqueSells24 > 140;
+        final hasEnoughTransactions = txnCount24 > 200;
         final hasEnoughLiquidity = liquidity > 6000;
-        final hasEnoughHolders = holders >= 400;
+        final hasEnoughHolders = holders >= 450;
 
         final hasEnoughMarketCap =
             marketCap >= 70000 && marketCap <= 1_000_000 ||
@@ -211,16 +211,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       token, TokenInfo marketCapAndAge, tokenAddress) async {
     final scamProbability = await analyzeTokenWithAI(token, marketCapAndAge);
     if (int.parse(scamProbability) <= 60) {
-      final int timestamp = marketCapAndAge.creationTimestamp != 0
-          ? marketCapAndAge.creationTimestamp
-          : marketCapAndAge.openTimestamp;
-      final int age =
-          DateTime.now().difference(getDateTime(timestamp)).inMinutes;
-      print(age);
-      print(marketCapAndAge.marketCap);
-      print(marketCapAndAge.name);
-      print(marketCapAndAge.address);
-
       AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
       sendTelegramNotificationMemCoins(token, scamProbability, marketCapAndAge);
       _sentTokens.add(tokenAddress);
@@ -1091,7 +1081,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                       Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
-                              builder: (context) => TokenPriceMonitorScreen(initialTokenAddress: '',)));
+                              builder: (context) => PoolListScreen()));
                     },
                     child: Icon(Icons.refresh, size: 18),
                   ),

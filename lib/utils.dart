@@ -70,6 +70,56 @@ String formatAgeSeconds(int seconds) {
   }
 }
 
+
+String formatMarketCapString(String value) {
+  final double? num = double.tryParse(value);
+  if (num == null) return 'N/A';
+  if (num >= 1000000) {
+    return '\$${(num / 1000000).toStringAsFixed(2)}M';
+  } else if (num >= 1000) {
+    return '\$${(num / 1000).toStringAsFixed(2)}K';
+  }
+  return '\$${num.toStringAsFixed(2)}';
+}
+
+String formatTime(String? timeStr) {
+  if (timeStr == null || timeStr.isEmpty) return 'N/A';
+
+  try {
+    final dateTime = DateTime.tryParse(timeStr);
+    if (dateTime != null) {
+      final difference = DateTime.now().difference(dateTime);
+      final seconds = difference.inSeconds;
+
+      if (seconds < 60) {
+        return '$seconds секунд${seconds == 1 ? 'а' : ''}';
+      } else if (seconds < 3600) {
+        final minutes = (seconds / 60).floor();
+        return '$minutes минут${minutes == 1 ? 'а' : ''}';
+      } else {
+        final hours = (seconds / 3600).floor();
+        return '$hours час${hours == 1 ? '' : 'а'}';
+      }
+    }
+
+    final seconds = int.tryParse(timeStr);
+    if (seconds != null) {
+      if (seconds < 60) {
+        return '$seconds секунд${seconds == 1 ? 'а' : ''}';
+      } else if (seconds < 3600) {
+        final minutes = (seconds / 60).floor();
+        return '$minutes минут${minutes == 1 ? 'а' : ''}';
+      } else {
+        final hours = (seconds / 3600).floor();
+        return '$hours час${hours == 1 ? '' : 'а'}';
+      }
+    }
+  } catch (e) {
+    return 'N/A';
+  }
+  return 'N/A';
+}
+
 String calculateTokenAge(int createdAt) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final ageInSeconds = now - createdAt;

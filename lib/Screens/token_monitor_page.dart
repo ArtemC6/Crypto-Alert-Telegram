@@ -334,6 +334,9 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
       DateTime currentTime,
       DateTime? lastNotificationTime) async {
     try {
+
+
+
       final String caption = '''
 *Token Info: $name ($symbol)* 🚀
 

@@ -77,10 +77,10 @@ $socialLinksString
           ? marketCapAndAge.logo
           : imageUrl ?? '';
       final imageResponse =
-      await http.get(Uri.parse(effectiveImageUrl)).timeout(
-        Duration(seconds: 10),
-        onTimeout: () => throw Exception("Timeout loading image"),
-      );
+          await http.get(Uri.parse(effectiveImageUrl)).timeout(
+                Duration(seconds: 10),
+                onTimeout: () => throw Exception("Timeout loading image"),
+              );
 
       if (imageResponse.statusCode == 200 &&
           imageResponse.bodyBytes.isNotEmpty) {
@@ -95,9 +95,9 @@ $socialLinksString
           ));
 
         final streamedResponse = await request.send().timeout(
-          Duration(seconds: 10),
-          onTimeout: () => throw Exception("Timeout sending photo"),
-        );
+              Duration(seconds: 10),
+              onTimeout: () => throw Exception("Timeout sending photo"),
+            );
         response = await http.Response.fromStream(streamedResponse);
 
         if (response.statusCode != 200) {
@@ -136,6 +136,49 @@ $socialLinksString
   }
 }
 
+Future<int> analyzeTokenWithAIMem(pool) async {
+  try {
+    const modelUrl =
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyAqWi9myqNVmaClyPhXLgMbveKI9fJAsZs';
+
+    final prompt = '''
+Analyze the next token and determine if it is fraudulent. Specify the probability of fraud (0-100%) only the numbers are correct
+$pool
+''';
+
+    final response = await http.post(
+      Uri.parse(modelUrl),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {'text': prompt},
+            ],
+          },
+        ],
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final result = json.decode(response.body);
+      if (result['candidates'] != null && result['candidates'].isNotEmpty) {
+        final generatedText =
+            result['candidates'][0]['content']['parts'][0]['text'].trim();
+        final probability = generatedText.replaceAll(RegExp(r'\D'), '');
+        return int.parse(probability);
+      }
+    }
+  } catch (e) {
+    print('Error analyzing token with Gemini: $e');
+    return 0;
+  }
+
+  return 0; // Return default '0' in case of an error or empty response
+}
+
 Future<String> analyzeTokenWithAI(
     dynamic token, TokenInfo marketCapAndAge) async {
   if (token == null || token.isEmpty || token.length < 2) return '0';
@@ -147,8 +190,7 @@ Future<String> analyzeTokenWithAI(
         ? marketCapAndAge.creationTimestamp
         : marketCapAndAge.openTimestamp;
 
-    final int age =
-        DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+    final int age = DateTime.now().difference(getDateTime(timestamp)).inMinutes;
 
     final prompt = '''
 Analyze the next token and determine if it is fraudulent. Specify the probability of fraud (0-100%) only the numbers are correct
