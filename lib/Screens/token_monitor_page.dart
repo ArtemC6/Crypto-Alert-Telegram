@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:binanse_notification/Screens/home.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -269,7 +270,6 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
     if (isWithinInterval &&
         currentMarketCap > 0 &&
         _marketCapChangePercentage.isFinite) {
-
       _lastNotificationTimes[tokenAddress] = now;
       _lastNotifiedMarketCap = currentMarketCap;
 
@@ -282,7 +282,9 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
         _marketCapChangePercentage,
         now,
         lastNotificationTime,
-      );
+      ).then((_) {
+        _marketCapChangePercentage = 0.0;
+      });
 
       if (mounted) {
         setState(() {
@@ -334,11 +336,9 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
       DateTime currentTime,
       DateTime? lastNotificationTime) async {
     try {
-
-
-
       final String caption = '''
-*Token Info: $name ($symbol)* 🚀
+*$name ($symbol)  ${changePercentage > 0 ? 'Up' : 'Down'} ${changePercentage.abs().toStringAsFixed(1)}% ${lastNotificationTime != null
+          ? formatDuration(currentTime.difference(lastNotificationTime)) : 'c'}!* ${changePercentage > 0 ? '📈' : '📉'}* 🚀
 
 🔹 *Changed ${changePercentage > 0 ? 'Up' : 'Down'} ${changePercentage.abs().toStringAsFixed(1)}% in ${lastNotificationTime != null ? formatDuration(currentTime.difference(lastNotificationTime)) : 'change'}!* ${changePercentage > 0 ? '📈' : '📉'}
 🔹 *Market Cap:* \$${formatMarketCap(marketCap.toString())}
@@ -422,6 +422,17 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Token Price Monitor'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+              builder: (context) => MyHomePage()));
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -494,6 +505,13 @@ class _TokenPriceMonitorScreenState extends State<TokenPriceMonitorScreen> {
                 style: Theme.of(context).textTheme.bodyMedium),
             Text('Change: ${_marketCapChangePercentage.toStringAsFixed(1)}%',
                 style: Theme.of(context).textTheme.bodyMedium),
+            Padding(
+              padding: const EdgeInsets.all(32),
+              child: ElevatedButton(
+                onPressed: _stopMonitoring,
+                child: Text('Stop Monitoring'),
+              ),
+            )
           ],
         ),
       ),

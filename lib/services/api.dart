@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:dio/dio.dart';
@@ -8,14 +10,12 @@ import '../utils.dart';
 
 import 'package:audioplayers/audioplayers.dart';
 
-
 Future<void> sendTelegramNotificationMem(Map<String, dynamic> pool) async {
   try {
     final percent = await analyzeTokenWithAIMem(pool);
     print(percent);
     if (percent >= 70) return;
     AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
-
 
     final baseAsset = pool['baseAsset'] ?? {};
     final stats5m = pool['baseAsset']['stats5m'] ?? {};
@@ -42,20 +42,17 @@ Future<void> sendTelegramNotificationMem(Map<String, dynamic> pool) async {
     final String createdAt =
         pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
 
-
-
     final double organicScore =
-    (baseAsset['organicScore'] ?? pool['organicScore'] ?? 0).toDouble();
+        (baseAsset['organicScore'] ?? pool['organicScore'] ?? 0).toDouble();
     final int organicBuyers24h =
-    (baseAsset['organicBuyers24h'] ?? pool['organicBuyers24h'] ?? 0) as int;
-
+        (baseAsset['organicBuyers24h'] ?? pool['organicBuyers24h'] ?? 0) as int;
 
     String socialLinksString =
         '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
 
     final audit = baseAsset['audit'] ?? {};
     final double topHoldersPercentage =
-    (audit['topHoldersPercentage'] ?? 0).toDouble();
+        (audit['topHoldersPercentage'] ?? 0).toDouble();
 
     final String caption = '''
 *🔹$name* 🚀
@@ -146,9 +143,12 @@ $socialLinksString
   }
 }
 
-
 Future<void> sendTelegramNotificationMemCoins(
-    dynamic token, String scamProbability, TokenInfo marketCapAndAge) async {
+    dynamic token,
+    String scamProbability,
+    TokenInfo marketCapAndAge,
+    int count,
+    Uint8List chartImage) async {
   try {
     final String symbol = token['token']['symbol'];
     final String name = token['token']['name'] ?? "Unknown";
@@ -200,64 +200,72 @@ Future<void> sendTelegramNotificationMemCoins(
 🔹 *Уникальные продажи:* $uniqueSells24
 🔹 *Холдеры:* ${token['holders'] ?? 'N/A'}
 
+$count
+
 $socialLinksString
 
 `$tokenAddress`
 '''
         .trim();
 
-    final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+    final String mediaGroupUrl =
+        'https://api.telegram.org/bot$telegramBotToken/sendMediaGroup';
     final String messageUrl =
         'https://api.telegram.org/bot$telegramBotToken/sendMessage';
 
     http.Response response;
 
-    if ((imageUrl?.isNotEmpty ?? false) || marketCapAndAge.logo.isNotEmpty) {
-      final String effectiveImageUrl = marketCapAndAge.logo.isNotEmpty
-          ? marketCapAndAge.logo
-          : imageUrl ?? '';
-      final imageResponse =
-          await http.get(Uri.parse(effectiveImageUrl)).timeout(
-                Duration(seconds: 10),
-                onTimeout: () => throw Exception("Timeout loading image"),
-              );
+    // Основное изображение
+    final String effectiveImageUrl = marketCapAndAge.logo.isNotEmpty
+        ? marketCapAndAge.logo
+        : imageUrl ?? '';
 
-      if (imageResponse.statusCode == 200 &&
-          imageResponse.bodyBytes.isNotEmpty) {
-        var request = http.MultipartRequest('POST', Uri.parse(url))
-          ..fields['chat_id'] = chatId
-          ..fields['caption'] = caption
-          ..fields['parse_mode'] = 'Markdown'
-          ..files.add(http.MultipartFile.fromBytes(
-            'photo',
+    if (effectiveImageUrl.isNotEmpty || chartImage.isNotEmpty) {
+      var request = http.MultipartRequest('POST', Uri.parse(mediaGroupUrl))
+        ..fields['chat_id'] = chatId
+        ..fields['media'] = jsonEncode([
+          {
+            'type': 'photo',
+            'media': 'attach://photo1',
+            'caption': caption,
+            'parse_mode': 'Markdown',
+          },
+          {
+            'type': 'photo',
+            'media': 'attach://photo2',
+          },
+        ]);
+
+      // Добавляем первое изображение (основное)
+      if (effectiveImageUrl.isNotEmpty) {
+        final imageResponse = await http.get(Uri.parse(effectiveImageUrl));
+        if (imageResponse.statusCode == 200 && imageResponse.bodyBytes.isNotEmpty) {
+          request.files.add(http.MultipartFile.fromBytes(
+            'photo1',
             imageResponse.bodyBytes,
             filename: 'token_$symbol.png',
           ));
-
-        final streamedResponse = await request.send().timeout(
-              Duration(seconds: 10),
-              onTimeout: () => throw Exception("Timeout sending photo"),
-            );
-        response = await http.Response.fromStream(streamedResponse);
-
-        if (response.statusCode != 200) {
-          print(
-              "Ошибка отправки фото в Telegram: ${response.statusCode}, ${response.body}");
         }
-      } else {
+      }
+
+      // Добавляем второе изображение (график)
+      if (chartImage.isNotEmpty) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'photo2',
+          chartImage,
+          filename: 'chart_$symbol.png',
+        ));
+      }
+
+      final streamedResponse = await request.send();
+      response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode != 200) {
         print(
-            "Не удалось загрузить изображение: ${imageResponse.statusCode}, размер: ${imageResponse.bodyBytes.length}");
-        response = await http.post(
-          Uri.parse(messageUrl),
-          body: {
-            'chat_id': chatId,
-            'text': caption,
-            'parse_mode': 'Markdown',
-          },
-        );
+            "Ошибка отправки медиагруппы в Telegram: ${response.statusCode}, ${response.body}");
       }
     } else {
+      // Если изображений нет, отправляем только текстовое сообщение
       response = await http.post(
         Uri.parse(messageUrl),
         body: {

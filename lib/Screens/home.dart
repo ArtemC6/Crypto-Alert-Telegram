@@ -9,11 +9,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:audioplayers/audioplayers.dart';
 
+import '../solana_chart.dart' show TokenChartScreen;
 import 'select_token.dart';
 import 'token_monitor_page.dart';
 import '../const.dart';
@@ -22,6 +24,27 @@ import '../model/token_model.dart';
 import '../services/api.dart';
 import '../services/storage.dart';
 import '../utils.dart';
+
+class ChartModelMem {
+  int time;
+  double? open;
+  double? high;
+  double? low;
+  double? close;
+
+  ChartModelMem({required this.time, this.open, this.high, this.low, this.close});
+
+  factory ChartModelMem.fromJson(Map<String, dynamic> json) {
+    return ChartModelMem(
+      time: json['time'],
+      open: json['open']?.toDouble(),
+      high: json['high']?.toDouble(),
+      low: json['low']?.toDouble(),
+      close: json['close']?.toDouble(),
+    );
+  }
+}
+
 
 enum ExchangeType { binanceFutures, okx, huobi }
 
@@ -61,11 +84,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final _chartKey = GlobalKey();
 
   List<dynamic> _previousTokens = [];
-  final List<dynamic> _saveTokens = [];
   final Set<String> _sentTokens = {};
 
   late WebSocketChannel _channel;
-  final Map<String, Map<String, dynamic>> _pools = {};
   final Set<String> _notifiedPoolIds = {};
 
   @override
@@ -108,7 +129,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           for (var update in data['data']) {
             if (update['type'] == 'update' && update['pool'] != null) {
               final pool = update['pool'];
-              _pools[pool['id']] = pool;
               if (passesFilters(pool) &&
                   !_notifiedPoolIds.contains(pool['id'])) {
                 _notifiedPoolIds.add(pool['id']);
@@ -126,7 +146,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                       .difference(getDateTime(timestamp))
                       .inMinutes;
 
-                  if (age <= 60) {
+                  if (age <= 40) {
                     sendTelegramNotificationMem(pool);
                   }
                 }
@@ -137,7 +157,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           for (var newPool in data['data']) {
             if (newPool['type'] == 'new' && newPool['pool'] != null) {
               final pool = newPool['pool'];
-              _pools[pool['id']] = pool;
               if (passesFilters(pool) &&
                   !_notifiedPoolIds.contains(pool['id'])) {
                 _notifiedPoolIds.add(pool['id']);
@@ -155,7 +174,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                       .difference(getDateTime(timestamp))
                       .inMinutes;
 
-                  if (age <= 60) {
+                  if (age <= 40) {
                     sendTelegramNotificationMem(pool);
                   }
                 }
@@ -163,22 +182,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             }
           }
         }
-
-        _pools.removeWhere((id, pool) {
-          final baseAsset = pool['baseAsset'] ?? {};
-          final String createdAt =
-              pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
-          if (createdAt.isNotEmpty) {
-            final createdDate = DateTime.tryParse(createdAt);
-            if (createdDate != null) {
-              final ageInSeconds =
-                  DateTime.now().difference(createdDate).inMinutes;
-              return ageInSeconds > 600;
-            }
-          }
-          return false;
-        });
-        setState(() {});
       },
       onError: (error) => print('WebSocket error: $error'),
       onDone: () {
@@ -236,29 +239,31 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     if (createdAt.isNotEmpty) {
       final createdDate = DateTime.tryParse(createdAt);
       if (createdDate != null) {
-        age = DateTime.now().difference(createdDate).inSeconds;
+        age = DateTime.now().difference(createdDate).inMinutes;
       }
+
+      if (age >= 60) return false;
     }
 
-    final bool hasEnoughMarketCap = marketCap >= 6000 && marketCap <= 300000;
-    final bool hasEnoughLiquidity = liquidity >= 5000;
-    final bool hasEnoughVolume24h = volume24h >= 40000;
-    final bool hasEnoughHolders = holders >= 200;
-    final bool isNotTooOld = age <= 2000;
+    final bool hasEnoughMarketCap = marketCap >= 4000 && marketCap <= 150000;
+    final bool hasEnoughLiquidity = liquidity >= 4000;
+    final bool hasEnoughVolume24h = volume24h >= 3000;
+    final bool hasEnoughHolders = holders >= 50;
+    final bool isNotTooOld = age <= 60;
 
     final bool hasHighVolume24h =
-        buyVolume24h >= 7000 || sellVolume24h >= 7000; // Высокий объем торгов
+        buyVolume24h >= 3000 || sellVolume24h >= 3000; // Высокий объем торгов
     final bool hasEnoughTraders24h =
-        numTraders24h >= 60; // Достаточно трейдеров за 24 часа
+        numTraders24h >= 20; // Достаточно трейдеров за 24 часа
     final bool hasMoreBuysThanSells24h =
         numBuys24h > numSells24h; // Покупок больше, чем продаж
     final bool hasLowTopHoldersPercentage =
         topHoldersPercentage <= 25; // Низкая концентрация у крупных держателей
 
     final bool hasGoodOrganicScore =
-        organicScore >= 50; // Хороший органический рост
+        organicScore >= 25; // Хороший органический рост
     final bool hasEnoughOrganicBuyers =
-        organicBuyers24h >= 50; // Достаточно органических покупателей
+        organicBuyers24h >= 25; // Достаточно органических покупателей
 
     return hasEnoughMarketCap &&
         hasEnoughLiquidity &&
@@ -292,7 +297,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
       final minTokenAgeInSeconds = 0 * 60;
-      final maxTokenAgeInSeconds = 240 * 60;
+      final maxTokenAgeInSeconds = 200 * 60;
 
       final sortedTokens = tokens.where((token) {
         final marketCap = parseDouble(token['marketCap']);
@@ -316,7 +321,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         final hasEnoughHolders = holders >= 500;
 
         final hasEnoughMarketCap =
-            marketCap >= 70000 && marketCap <= 1_000_000 ||
+            marketCap >= 10000 && marketCap <= 1_000_000 ||
                 marketCap >= 100000 && marketCap < 3_000_000 ||
                 marketCap >= 3000000 && marketCap < 5_000_000 ||
                 marketCap >= 5000000 && marketCap < 20_000_000 ||
@@ -366,39 +371,165 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
         final int age =
             DateTime.now().difference(getDateTime(timestamp)).inMinutes;
-        if (age <= 240) {
-          if (age <= 3 && marketCap <= 30000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 5 && marketCap <= 50000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 15 && marketCap <= 100000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 30 && marketCap <= 150000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 50 && marketCap <= 200000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 100 && marketCap <= 500000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 200 && marketCap <= 1000000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 240 && marketCap <= 2000000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
-          } else if (age <= 300 && marketCap <= 3000000) {
-            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress);
+
+        if (age <= 100) {
+          if (age <= 3 && marketCap <= 100000 && marketCap >= 5000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 1);
+          } else if (age <= 5 && marketCap <= 100000 && marketCap >= 10000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 2);
+          } else if (age <= 15 && marketCap <= 150000 && marketCap >= 20000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 3);
+          } else if (age <= 20 && marketCap <= 200000 && marketCap >= 30000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 4);
+          } else if (age <= 30 && marketCap <= 300000 && marketCap >= 50000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 5);
+          } else if (age <= 50 && marketCap <= 500000 && marketCap >= 70000) {
+            _notifyAndSaveToken(token, marketCapAndAge, tokenAddress, 6);
           }
         }
       }
     }
   }
 
+
+
+  Future<List<ChartModelMem>?> fetchChartDataMem(String tokenAddress) async {
+    final now = DateTime.now().toUtc();
+    final toTimestamp = now.millisecondsSinceEpoch; // Текущий timestamp в миллисекундах
+    final fromTimestamp = toTimestamp - 4500000; // Минус 75 минут
+
+    final url = 'https://datapi.jup.ag/v1/charts/ARc2rBbGxDNHmgM85sUuicBiWdJyBvaUfMxnGVu7gxSq?interval='
+        '15_SECOND&baseAsset=$tokenAddress&from=$fromTimestamp&to=$toTimestamp&candles=300&type=mcap';
+
+    final headers = {
+      'accept': 'application/json',
+      'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'origin': 'https://jup.ag',
+      'priority': 'u=1, i',
+      'referer': 'https://jup.ag/',
+      'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-site',
+      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+    };
+
+    // Выполняем запрос
+    final response = await http.get(Uri.parse(url), headers: headers);
+
+
+    if (response.statusCode == 200) {
+      Map<String, dynamic> data = json.decode(response.body);
+      List<dynamic> candles = data['candles'];
+
+      return candles.map((item) => ChartModelMem.fromJson(item)).toList();
+    } else {
+      return null;
+    }
+  }
+
   Future<void> _notifyAndSaveToken(
-      token, TokenInfo marketCapAndAge, tokenAddress) async {
+      token, TokenInfo marketCapAndAge, tokenAddress, int count) async {
     final scamProbability = await analyzeTokenWithAI(token, marketCapAndAge);
     if (int.parse(scamProbability) <= 60) {
-      AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
-      sendTelegramNotificationMemCoins(token, scamProbability, marketCapAndAge);
       _sentTokens.add(tokenAddress);
-      _saveTokens.add(token);
+      AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+
+      final chartData = await fetchChartDataMem(tokenAddress);
+      final chartKey = GlobalKey();
+      Uint8List? chartImage;
+
+      if (chartData != null && chartData.isNotEmpty) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+
+        await Future.delayed(Duration(milliseconds: 1000));
+
+        while (Navigator.of(context).canPop()) {
+          await SchedulerBinding.instance.endOfFrame;
+          await Future.delayed(Duration(milliseconds: 20));
+        }
+
+        await showDialog(
+          context: context,
+          barrierColor: Colors.transparent,
+          builder: (context) {
+            final height = MediaQuery.of(context).size.height;
+
+            Future.delayed(Duration(milliseconds: 150), () async {
+              if (mounted && Navigator.canPop(context)) {
+                Navigator.pop(context);
+              }
+            });
+
+            return Dialog(
+              insetPadding: EdgeInsets.only(
+                left: 0,
+                right: 0,
+                bottom: height * 0.15,
+                top: height * 0.15,
+              ),
+              child: Scaffold(
+                backgroundColor: Colors.transparent,
+                body: SizedBox(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.height,
+                  child: RepaintBoundary(
+                    key: chartKey,
+                    child: SfCartesianChart(
+                      backgroundColor: Colors.black,
+                      trackballBehavior: TrackballBehavior(
+                        enable: true,
+                        activationMode: ActivationMode.singleTap,
+                        tooltipAlignment: ChartAlignment.near,
+                      ),
+                      primaryXAxis: NumericAxis(isVisible: false),
+                      zoomPanBehavior: ZoomPanBehavior(
+                        enablePinching: true,
+                        zoomMode: ZoomMode.xy,
+                        selectionRectBorderWidth: 10,
+                        enablePanning: true,
+                        enableDoubleTapZooming: true,
+                        enableMouseWheelZooming: true,
+                        enableSelectionZooming: true,
+                      ),
+                      series: <CandleSeries>[
+                        CandleSeries<ChartModelMem, int>(
+                          enableSolidCandles: true,
+                          enableTooltip: true,
+                          dataSource: chartData ?? [],
+                          xValueMapper: (ChartModelMem sales, _) => sales.time,
+                          lowValueMapper: (ChartModelMem sales, _) => sales.low,
+                          highValueMapper: (ChartModelMem sales, _) => sales.high,
+                          openValueMapper: (ChartModelMem sales, _) => sales.open,
+                          closeValueMapper: (ChartModelMem sales, _) =>
+                              sales.close,
+                          animationDuration: 0,
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+
+        chartImage = await captureChart(chartKey);
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ]);
+      }
+
+      if(chartImage != null) {
+        await sendTelegramNotificationMemCoins(
+            token, scamProbability, marketCapAndAge, count, chartImage);
+      }
     }
   }
 
@@ -1024,7 +1155,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     int limit = 60;
     try {
       final binanceResponse = await http.get(Uri.parse(
-          'https://fapi.binance.com/fapi/v1/klines?symbol=$symbol&interval=5m&limit=$limit'));
+          'https://api.binance.com/api/v1/klines?symbol=$symbol&interval=5m&limit=$limit'));
 
       if (binanceResponse.statusCode == 200) {
         final data = json.decode(binanceResponse.body) as List;
@@ -1042,13 +1173,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     try {
       final bybitResponse = await http.get(Uri.parse(
           'https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=5&limit=$limit'));
+
       if (bybitResponse.statusCode == 200) {
         final jsonData = json.decode(bybitResponse.body);
-        if (jsonData['result'] != null && jsonData['result']['list'] != null) {
+        final retCode = jsonData['retCode'] as int?;
+        final retMsg = jsonData['retMsg'] as String?;
+
+        if (retCode == 0 &&
+            jsonData['result'] != null &&
+            jsonData['result']['list'] != null) {
           final data = jsonData['result']['list'] as List;
           return data.map((item) => ChartModel.fromJson(item)).toList();
         } else {
-          print('Bybit API response missing "result" or "list" fields');
+          print('Bybit API error - retCode: $retCode, retMsg: $retMsg');
           return null;
         }
       } else {
@@ -1215,62 +1352,61 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(2),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Center(
-                    child: Row(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: ElevatedButton(
-                            onPressed: () {
-                              setState(() => isHide = !isHide);
-                              filteredCoinsBinance.clear();
-                              filteredCoinsOKX.clear();
-                              filteredCoinsHuobi.clear();
-                            },
-                            child: Text(isHide
-                                ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
-                                : 'Show List'),
-                          ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Center(
+                  child: Row(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() => isHide = !isHide);
+                            filteredCoinsBinance.clear();
+                            filteredCoinsOKX.clear();
+                            filteredCoinsHuobi.clear();
+                          },
+                          child: Text(isHide
+                              ? 'F ${filteredCoinsBinance.length} : O ${filteredCoinsOKX.length} : H ${filteredCoinsHuobi.length}'
+                              : 'Show List'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  ElevatedButton(
-                    onPressed: _openSelectCoinsScreen,
-                    child: Icon(Icons.search, size: 18),
-                  ),
-                  SizedBox(width: 1),
-                  ElevatedButton(
-                    onPressed: _deleteCoins,
-                    child: Icon(Icons.delete, size: 18),
-                  ),
-                  SizedBox(width: 1),
-                  ElevatedButton(
-                    onPressed: () async {
-                      _coinsListBinanceFeature = [];
-                      coinsListOKX = [];
-                      coinsListHuobi = [];
-                      coinsListForSelect = [];
-                      itemChartMain = [];
+                ),
+                ElevatedButton(
+                  onPressed: _openSelectCoinsScreen,
+                  child: Icon(Icons.search, size: 16),
+                ),
+                ElevatedButton(
+                  onPressed: _deleteCoins,
+                  child: Icon(Icons.delete, size: 16),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    _coinsListBinanceFeature = [];
+                    coinsListOKX = [];
+                    coinsListHuobi = [];
+                    coinsListForSelect = [];
+                    itemChartMain = [];
 
-                      await _channelSpotBinanceFeatured?.sink.close();
-                      await _huobiChannel?.sink.close();
-                      await _okxChannel?.sink.close();
+                    await _channelSpotBinanceFeatured?.sink.close();
+                    await _huobiChannel?.sink.close();
+                    await _okxChannel?.sink.close();
 
-                      Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(
-                              builder: (context) => TokenPriceMonitorScreen()));
-                    },
-                    child: Icon(Icons.refresh, size: 18),
-                  ),
-                ],
-              ),
+                    // Navigator.pushReplacement(
+                    //     context,
+                    //     MaterialPageRoute(
+                    //         builder: (context) => TokenPriceMonitorScreen()));
+                    Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => TokenChartScreen()));
+                  },
+                  child: Icon(Icons.refresh, size: 16),
+                ),
+              ],
             ),
             SizedBox(
                 height: myHeight * (isHide ? 0.35 : 0.60),
