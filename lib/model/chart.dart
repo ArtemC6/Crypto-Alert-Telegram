@@ -17,3 +17,24 @@ class ChartModel {
     );
   }
 }
+
+class ChartModelMem {
+  int time;
+  double? open;
+  double? high;
+  double? low;
+  double? close;
+
+  ChartModelMem(
+      {required this.time, this.open, this.high, this.low, this.close});
+
+  factory ChartModelMem.fromJson(Map<String, dynamic> json) {
+    return ChartModelMem(
+      time: json['time'],
+      open: double.parse(json['open']),
+      high: double.parse(json['high']),
+      low: double.parse(json['low']),
+      close: double.parse(json['close']),
+    );
+  }
+}

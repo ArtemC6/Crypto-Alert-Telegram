@@ -44,7 +44,7 @@ class _PoolListScreenState extends State<PoolListScreen> {
               _pools[pool['id']] = pool;
               if (passesFilters(pool) &&
                   !_notifiedPoolIds.contains(pool['id'])) {
-                sendTelegramNotificationMem(pool);
+                // sendTelegramNotificationMem(pool);
                 _notifiedPoolIds.add(pool['id']);
               }
             }
@@ -57,7 +57,7 @@ class _PoolListScreenState extends State<PoolListScreen> {
               if (passesFilters(pool) &&
                   !_notifiedPoolIds.contains(pool['id'])) {
                 _notifiedPoolIds.add(pool['id']);
-                sendTelegramNotificationMem(pool);
+                // sendTelegramNotificationMem(pool);
               }
             }
           }

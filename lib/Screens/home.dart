@@ -17,34 +17,12 @@ import 'package:audioplayers/audioplayers.dart';
 
 import '../solana_chart.dart' show TokenChartScreen;
 import 'select_token.dart';
-import 'token_monitor_page.dart';
 import '../const.dart';
 import '../model/chart.dart';
 import '../model/token_model.dart';
 import '../services/api.dart';
 import '../services/storage.dart';
 import '../utils.dart';
-
-class ChartModelMem {
-  int time;
-  double? open;
-  double? high;
-  double? low;
-  double? close;
-
-  ChartModelMem({required this.time, this.open, this.high, this.low, this.close});
-
-  factory ChartModelMem.fromJson(Map<String, dynamic> json) {
-    return ChartModelMem(
-      time: json['time'],
-      open: json['open']?.toDouble(),
-      high: json['high']?.toDouble(),
-      low: json['low']?.toDouble(),
-      close: json['close']?.toDouble(),
-    );
-  }
-}
-
 
 enum ExchangeType { binanceFutures, okx, huobi }
 
@@ -113,82 +91,157 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  void connectWebSocketMem() {
-    _channel = WebSocketChannel.connect(
-      Uri.parse('wss://trench-stream.jup.ag/ws'),
-    );
+  void connectWebSocketMem() async {
+    try {
+      _channel = WebSocketChannel.connect(
+        Uri.parse('wss://trench-stream.jup.ag/ws'),
+      );
 
-    _channel.sink.add(jsonEncode({"type": "subscribe:recent"}));
-    _channel.sink.add(jsonEncode({"type": "subscribe:pool", "pools": []}));
-    _channel.sink.add(jsonEncode({"type": "subscribe:txns", "assets": []}));
+      _channel.sink.add(jsonEncode({"type": "subscribe:recent"}));
+      _channel.sink.add(jsonEncode({"type": "subscribe:pool", "pools": []}));
+      _channel.sink.add(jsonEncode({"type": "subscribe:txns", "assets": []}));
 
-    _channel.stream.listen(
-      (message) async {
-        final data = jsonDecode(message);
-        if (data['type'] == 'updates') {
-          for (var update in data['data']) {
-            if (update['type'] == 'update' && update['pool'] != null) {
-              final pool = update['pool'];
-              if (passesFilters(pool) &&
-                  !_notifiedPoolIds.contains(pool['id'])) {
-                _notifiedPoolIds.add(pool['id']);
-
-                final baseAsset = pool['baseAsset'] ?? {};
-                final String tokenAddress = baseAsset['id'] ?? 'N/A';
-                final marketCapAndAge = await fetchTokenInfo(tokenAddress);
-
-                if (marketCapAndAge == null) {
-                  final int timestamp = marketCapAndAge!.creationTimestamp != 0
-                      ? marketCapAndAge.creationTimestamp
-                      : marketCapAndAge.openTimestamp;
-
-                  final int age = DateTime.now()
-                      .difference(getDateTime(timestamp))
-                      .inMinutes;
-
-                  if (age <= 40) {
-                    sendTelegramNotificationMem(pool);
-                  }
-                }
-              }
+      _channel.stream.listen(
+        (message) async {
+          try {
+            final data = jsonDecode(message);
+            if (data['type'] == 'updates' || data['type'] == 'new') {
+              await handlePoolUpdates(data);
             }
+          } catch (e) {
+            print('Error processing message: $e');
           }
-        } else if (data['type'] == 'new') {
-          for (var newPool in data['data']) {
-            if (newPool['type'] == 'new' && newPool['pool'] != null) {
-              final pool = newPool['pool'];
-              if (passesFilters(pool) &&
-                  !_notifiedPoolIds.contains(pool['id'])) {
-                _notifiedPoolIds.add(pool['id']);
+        },
+        onError: (error) => print('WebSocket error: $error'),
+        onDone: () {
+          print('WebSocket closed');
+          Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
+        },
+      );
+    } catch (e) {
+      print('Error connecting to WebSocket: $e');
+      Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
+    }
+  }
 
-                final baseAsset = pool['baseAsset'] ?? {};
-                final String tokenAddress = baseAsset['id'] ?? 'N/A';
-                final marketCapAndAge = await fetchTokenInfo(tokenAddress);
+  Future<void> handlePoolUpdates(Map<String, dynamic> data) async {
+    final pools = data['data'] as List<dynamic>;
+    final type = data['type'];
 
-                if (marketCapAndAge == null) {
-                  final int timestamp = marketCapAndAge!.creationTimestamp != 0
-                      ? marketCapAndAge.creationTimestamp
-                      : marketCapAndAge.openTimestamp;
+    for (var poolData in pools) {
+      if (poolData['type'] == type && poolData['pool'] != null) {
+        final pool = poolData['pool'];
+        if (passesFilters(pool) && !_notifiedPoolIds.contains(pool['id'])) {
+          _notifiedPoolIds.add(pool['id']);
 
-                  final int age = DateTime.now()
-                      .difference(getDateTime(timestamp))
-                      .inMinutes;
+          final baseAsset = pool['baseAsset'] ?? {};
+          final String tokenAddress = baseAsset['id'] ?? 'N/A';
+          final marketCapAndAge = await fetchTokenInfo(tokenAddress);
 
-                  if (age <= 40) {
-                    sendTelegramNotificationMem(pool);
+          if (marketCapAndAge == null) {
+            final int timestamp = marketCapAndAge!.creationTimestamp != 0
+                ? marketCapAndAge.creationTimestamp
+                : marketCapAndAge.openTimestamp;
+
+            final int age =
+                DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+
+            if (age <= 40) {
+              final chartData = await fetchChartDataMem(tokenAddress);
+              if (chartData != null && chartData.isNotEmpty) {
+                final chartImage = await showChartDialog(chartData);
+                if (chartImage != null) {
+                  final percent = await analyzeTokenWithAIMem(pool);
+                  if (percent <= 60) {
+                    AudioPlayer()
+                        .play(AssetSource('audio/coll.mp3'), volume: 0.8);
+
+                    sendTelegramNotificationMem(pool, chartImage, percent);
                   }
                 }
               }
             }
           }
         }
-      },
-      onError: (error) => print('WebSocket error: $error'),
-      onDone: () {
-        print('WebSocket closed');
-        Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
+      }
+    }
+  }
+
+  Future<Uint8List?> showChartDialog(List<ChartModelMem> chartData) async {
+    final chartKey = GlobalKey();
+    Uint8List? chartImage;
+
+    while (Navigator.of(context).canPop()) {
+      await SchedulerBinding.instance.endOfFrame;
+      await Future.delayed(Duration(milliseconds: 20));
+    }
+
+    await showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) {
+        final height = MediaQuery.of(context).size.height;
+
+        Future.delayed(Duration(milliseconds: 150), () async {
+          if (mounted && Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        });
+
+        return Dialog(
+          insetPadding: EdgeInsets.only(
+            left: 0,
+            right: 0,
+            bottom: height * 0.15,
+            top: height * 0.15,
+          ),
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            body: SizedBox(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height,
+              child: RepaintBoundary(
+                key: chartKey,
+                child: SfCartesianChart(
+                  backgroundColor: Colors.black,
+                  trackballBehavior: TrackballBehavior(
+                    enable: true,
+                    activationMode: ActivationMode.singleTap,
+                    tooltipAlignment: ChartAlignment.near,
+                  ),
+                  primaryXAxis: NumericAxis(isVisible: false),
+                  zoomPanBehavior: ZoomPanBehavior(
+                    enablePinching: true,
+                    zoomMode: ZoomMode.xy,
+                    selectionRectBorderWidth: 10,
+                    enablePanning: true,
+                    enableDoubleTapZooming: true,
+                    enableMouseWheelZooming: true,
+                    enableSelectionZooming: true,
+                  ),
+                  series: <CandleSeries>[
+                    CandleSeries<ChartModelMem, int>(
+                      enableSolidCandles: true,
+                      enableTooltip: true,
+                      dataSource: chartData,
+                      xValueMapper: (ChartModelMem sales, _) => sales.time,
+                      lowValueMapper: (ChartModelMem sales, _) => sales.low,
+                      highValueMapper: (ChartModelMem sales, _) => sales.high,
+                      openValueMapper: (ChartModelMem sales, _) => sales.open,
+                      closeValueMapper: (ChartModelMem sales, _) => sales.close,
+                      animationDuration: 0,
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
       },
     );
+
+    chartImage = await captureChart(chartKey);
+    return chartImage;
   }
 
   bool passesFilters(Map<String, dynamic> pool) {
@@ -391,143 +444,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-
-
-  Future<List<ChartModelMem>?> fetchChartDataMem(String tokenAddress) async {
-    final now = DateTime.now().toUtc();
-    final toTimestamp = now.millisecondsSinceEpoch; // Текущий timestamp в миллисекундах
-    final fromTimestamp = toTimestamp - 4500000; // Минус 75 минут
-
-    final url = 'https://datapi.jup.ag/v1/charts/ARc2rBbGxDNHmgM85sUuicBiWdJyBvaUfMxnGVu7gxSq?interval='
-        '15_SECOND&baseAsset=$tokenAddress&from=$fromTimestamp&to=$toTimestamp&candles=300&type=mcap';
-
-    final headers = {
-      'accept': 'application/json',
-      'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-      'origin': 'https://jup.ag',
-      'priority': 'u=1, i',
-      'referer': 'https://jup.ag/',
-      'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-site',
-      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
-    };
-
-    // Выполняем запрос
-    final response = await http.get(Uri.parse(url), headers: headers);
-
-
-    if (response.statusCode == 200) {
-      Map<String, dynamic> data = json.decode(response.body);
-      List<dynamic> candles = data['candles'];
-
-      return candles.map((item) => ChartModelMem.fromJson(item)).toList();
-    } else {
-      return null;
-    }
-  }
-
   Future<void> _notifyAndSaveToken(
       token, TokenInfo marketCapAndAge, tokenAddress, int count) async {
     final scamProbability = await analyzeTokenWithAI(token, marketCapAndAge);
     if (int.parse(scamProbability) <= 60) {
       _sentTokens.add(tokenAddress);
+
       AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
-
       final chartData = await fetchChartDataMem(tokenAddress);
-      final chartKey = GlobalKey();
-      Uint8List? chartImage;
+      final chartImage = await showChartDialog(chartData!);
 
-      if (chartData != null && chartData.isNotEmpty) {
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-
-        await Future.delayed(Duration(milliseconds: 1000));
-
-        while (Navigator.of(context).canPop()) {
-          await SchedulerBinding.instance.endOfFrame;
-          await Future.delayed(Duration(milliseconds: 20));
-        }
-
-        await showDialog(
-          context: context,
-          barrierColor: Colors.transparent,
-          builder: (context) {
-            final height = MediaQuery.of(context).size.height;
-
-            Future.delayed(Duration(milliseconds: 150), () async {
-              if (mounted && Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
-            });
-
-            return Dialog(
-              insetPadding: EdgeInsets.only(
-                left: 0,
-                right: 0,
-                bottom: height * 0.15,
-                top: height * 0.15,
-              ),
-              child: Scaffold(
-                backgroundColor: Colors.transparent,
-                body: SizedBox(
-                  width: MediaQuery.of(context).size.width,
-                  height: MediaQuery.of(context).size.height,
-                  child: RepaintBoundary(
-                    key: chartKey,
-                    child: SfCartesianChart(
-                      backgroundColor: Colors.black,
-                      trackballBehavior: TrackballBehavior(
-                        enable: true,
-                        activationMode: ActivationMode.singleTap,
-                        tooltipAlignment: ChartAlignment.near,
-                      ),
-                      primaryXAxis: NumericAxis(isVisible: false),
-                      zoomPanBehavior: ZoomPanBehavior(
-                        enablePinching: true,
-                        zoomMode: ZoomMode.xy,
-                        selectionRectBorderWidth: 10,
-                        enablePanning: true,
-                        enableDoubleTapZooming: true,
-                        enableMouseWheelZooming: true,
-                        enableSelectionZooming: true,
-                      ),
-                      series: <CandleSeries>[
-                        CandleSeries<ChartModelMem, int>(
-                          enableSolidCandles: true,
-                          enableTooltip: true,
-                          dataSource: chartData ?? [],
-                          xValueMapper: (ChartModelMem sales, _) => sales.time,
-                          lowValueMapper: (ChartModelMem sales, _) => sales.low,
-                          highValueMapper: (ChartModelMem sales, _) => sales.high,
-                          openValueMapper: (ChartModelMem sales, _) => sales.open,
-                          closeValueMapper: (ChartModelMem sales, _) =>
-                              sales.close,
-                          animationDuration: 0,
-                        )
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-
-        chartImage = await captureChart(chartKey);
-        await SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown,
-        ]);
-      }
-
-      if(chartImage != null) {
-        await sendTelegramNotificationMemCoins(
+      if (chartImage != null) {
+        sendTelegramNotificationMemCoins(
             token, scamProbability, marketCapAndAge, count, chartImage);
       }
     }
@@ -999,7 +927,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
         if (isLastCandleAdd) {
           if (itemChart != null && itemChart.isNotEmpty) {
-            print(symbol);
             AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
 
             setState(() => itemChartMain = itemChart);
