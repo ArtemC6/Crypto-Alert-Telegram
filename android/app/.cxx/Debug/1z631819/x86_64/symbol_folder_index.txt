@@ -1,0 +1,1 @@
+/Users/adigalaxy/Documents/Flutter Projects/binanse_notification/build/app/intermediates/cxx/Debug/1z631819/obj/x86_64

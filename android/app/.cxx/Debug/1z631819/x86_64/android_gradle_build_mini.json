@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/Users/adigalaxy/development/flutter/packages/flutter_tools/gradle/src/main/groovy/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/adigalaxy/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/Users/adigalaxy/Documents/Flutter Projects/binanse_notification/android/app/.cxx/Debug/1z631819/x86_64",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/adigalaxy/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/Users/adigalaxy/Documents/Flutter Projects/binanse_notification/android/app/.cxx/Debug/1z631819/x86_64",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}

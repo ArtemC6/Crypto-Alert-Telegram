@@ -50,5 +50,8 @@
         <string>fetch</string>
         <string>remote-notification</string>
     </array>
+    <key>UILocalNotificationDefaultSoundName</key>
+    <string>notification_sound.caf</string>
+
 </dict>
 </plist>
