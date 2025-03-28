@@ -10,17 +10,23 @@ DateTime getDateTime(int timestamp) {
   return DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
 }
 
-Future<Uint8List?> captureChart(GlobalKey chartKey) async {
-  try {
-    RenderRepaintBoundary boundary =
-        chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-    ui.Image image = await boundary.toImage(pixelRatio: 2.5);
-    ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    return byteData?.buffer.asUint8List();
-  } catch (e) {
-    print("Error capturing chart: $e");
-    return null;
+Future<Uint8List?> captureChart(GlobalKey chartKey, {int maxAttempts = 5}) async {
+  int attempts = 0;
+  while (attempts < maxAttempts) {
+    try {
+      RenderRepaintBoundary boundary =
+      chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 3);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (e) {
+      attempts++;
+      print("Error capturing chart: $e. Attempt $attempts of $maxAttempts.");
+      await Future.delayed(Duration(milliseconds: 500));
+    }
   }
+  print("Failed to capture chart after $maxAttempts attempts.");
+  return null;
 }
 
 String shortenNumber(double? num) {

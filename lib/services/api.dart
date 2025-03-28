@@ -13,114 +13,97 @@ import '../utils.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 Future<void> sendTelegramNotificationMem(
-    Map<String, dynamic> pool, Uint8List chartImage, int percent) async {
+  TokenInfo marketCapAndAge,
+  int percent,
+  Uint8List chartImage,
+) async {
   try {
-    final baseAsset = pool['baseAsset'] ?? {};
-    final stats5m = pool['baseAsset']['stats5m'] ?? {};
+    final int timestamp = marketCapAndAge.creationTimestamp != 0
+        ? marketCapAndAge.creationTimestamp
+        : marketCapAndAge.openTimestamp;
 
-    final double priceChange5m = (stats5m['priceChange'] ?? 0).toDouble();
-    final double buyVolume5m = (stats5m['buyVolume'] ?? 0).toDouble();
-    final double sellVolume5m = (stats5m['sellVolume'] ?? 0).toDouble();
-    final int numBuys5m = (stats5m['numBuys'] ?? 0) as int;
-    final int numSells5m = (stats5m['numSells'] ?? 0) as int;
-    final int numTraders5m = (stats5m['numTraders'] ?? 0) as int;
-    final int numBuyers5m = (stats5m['numBuyers'] ?? 0) as int;
-    final int numSellers5m = (stats5m['numSellers'] ?? 0) as int;
-
-    final String symbol = baseAsset['symbol'] ?? 'Unknown';
-    final String name = baseAsset['name'] ?? 'Unknown';
-    final String liquidity = pool['liquidity']?.toStringAsFixed(2) ?? 'N/A';
-    final String? imageUrl = baseAsset['icon'];
-    final String tokenAddress = baseAsset['id'] ?? 'N/A';
-    final String marketCap = pool['mcap']?.toStringAsFixed(2) ??
-        baseAsset['mcap']?.toStringAsFixed(2) ??
-        'N/A';
-    final String volume24h = pool['volume24h']?.toStringAsFixed(2) ?? 'N/A';
-    final String holderCount = baseAsset['holderCount']?.toString() ?? 'N/A';
-    final String createdAt =
-        pool['createdAt'] ?? baseAsset['firstPool']?['CreatedAt'] ?? '';
-
-    final double organicScore =
-        (baseAsset['organicScore'] ?? pool['organicScore'] ?? 0).toDouble();
-    final int organicBuyers24h =
-        (baseAsset['organicBuyers24h'] ?? pool['organicBuyers24h'] ?? 0) as int;
+    final int age = DateTime.now().difference(getDateTime(timestamp)).inMinutes;
 
     String socialLinksString =
-        '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
+        '🔹 *Axiom:* ${'https://axiom.trade/meme/${marketCapAndAge.biggestPoolAddress}'}\n\n';
 
-    final audit = baseAsset['audit'] ?? {};
-    final double topHoldersPercentage =
-        (audit['topHoldersPercentage'] ?? 0).toDouble();
+    final String symbol = marketCapAndAge.symbol;
+    final String imageUrl = marketCapAndAge.logo;
 
     final String caption = '''
-*🔹$name* 🚀
+*Новый токен обнаружен!* 🚀
 
-🔹 *Symbol:* $symbol : $percent%  
-🔹 *Market Cap:* ${formatMarketCapString(marketCap)}
-🔹 *Age:* ${formatTime(createdAt)}
-🔹 *Liquidity:* \$${formatMarketCapString(liquidity)}
-🔹 *24h Volume:* \$${formatMarketCapString(volume24h)}
-🔹 *Holders:* $holderCount
-
-🔹 *Top Holders Percentage:* ${topHoldersPercentage.toStringAsFixed(1)}%
-
-
-🔹 *priceChange5m:* $priceChange5m
-
-🔹 *buyVolume5m:* $buyVolume5m
-🔹 *sellVolume5m:* $sellVolume5m
-
-🔹 *numBuys5m:* $numBuys5m
-🔹 *numSells5m:* $numSells5m
-
-🔹 *numTraders5m:* $numTraders5m
-
-🔹 *numBuyers5m:* $numBuyers5m
-🔹 *numSellers5m:* $numSellers5m
-
-  
-
-🔹 *Token Address:* `$tokenAddress`
+🔹 *Название:* ${marketCapAndAge.name} : ${percent}% scam
+🔹 *Символ:* ${marketCapAndAge.symbol}
+🔹 *Маркеткап:* ${formatMarketCap(marketCapAndAge.marketCap.toString())}
+🔹 *Возраст:* ${formatAge(age)}
+🔹 *Ликвидность:* ${formatMarketCap(marketCapAndAge.liquidity)}
+🔹 *Холдеры:* ${marketCapAndAge.holderCount}
 
 $socialLinksString
+
+`${marketCapAndAge.address}`
 '''
         .trim();
 
-    final String url =
-        'https://api.telegram.org/bot$telegramBotToken/sendPhoto';
+    final String mediaGroupUrl =
+        'https://api.telegram.org/bot$telegramBotToken/sendMediaGroup';
     final String messageUrl =
         'https://api.telegram.org/bot$telegramBotToken/sendMessage';
 
     http.Response response;
 
-    // Отправка основного сообщения с изображением токена (если есть)
-    if (imageUrl != null && imageUrl.isNotEmpty) {
-      final imageResponse = await http.get(Uri.parse(imageUrl));
-      if (imageResponse.statusCode == 200 &&
-          imageResponse.bodyBytes.isNotEmpty) {
-        var request = http.MultipartRequest('POST', Uri.parse(url))
-          ..fields['chat_id'] = chatId
-          ..fields['caption'] = caption
-          ..fields['parse_mode'] = 'Markdown'
-          ..files.add(http.MultipartFile.fromBytes(
-            'photo',
-            imageResponse.bodyBytes,
-            filename: 'pool_$symbol.png',
-          ));
+    // Основное изображение
+    final String effectiveImageUrl =
+        marketCapAndAge.logo.isNotEmpty ? marketCapAndAge.logo : imageUrl ?? '';
 
-        final streamedResponse = await request.send();
-        response = await http.Response.fromStream(streamedResponse);
-      } else {
-        response = await http.post(
-          Uri.parse(messageUrl),
-          body: {
-            'chat_id': chatId,
-            'text': caption,
+    if (effectiveImageUrl.isNotEmpty || chartImage.isNotEmpty) {
+      var request = http.MultipartRequest('POST', Uri.parse(mediaGroupUrl))
+        ..fields['chat_id'] = chatId
+        ..fields['media'] = jsonEncode([
+          {
+            'type': 'photo',
+            'media': 'attach://photo1',
+            'caption': caption,
             'parse_mode': 'Markdown',
           },
-        );
+          {
+            'type': 'photo',
+            'media': 'attach://photo2',
+          },
+        ]);
+
+      // Добавляем первое изображение (основное)
+      if (effectiveImageUrl.isNotEmpty) {
+        final imageResponse = await http.get(Uri.parse(effectiveImageUrl));
+        if (imageResponse.statusCode == 200 &&
+            imageResponse.bodyBytes.isNotEmpty) {
+          request.files.add(http.MultipartFile.fromBytes(
+            'photo1',
+            imageResponse.bodyBytes,
+            filename: 'token_$symbol.png',
+          ));
+        }
+      }
+
+      // Добавляем второе изображение (график)
+      if (chartImage.isNotEmpty) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'photo2',
+          chartImage,
+          filename: 'chart_$symbol.png',
+        ));
+      }
+
+      final streamedResponse = await request.send();
+      response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode != 200) {
+        print(
+            "Ошибка отправки медиагруппы в Telegram: ${response.statusCode}, ${response.body}");
       }
     } else {
+      // Если изображений нет, отправляем только текстовое сообщение
       response = await http.post(
         Uri.parse(messageUrl),
         body: {
@@ -133,33 +116,10 @@ $socialLinksString
 
     if (response.statusCode != 200) {
       print(
-          "Failed to send Telegram notification: ${response.statusCode}, ${response.body}");
-    } else {
-      print("Notification sent successfully for token: $tokenAddress");
-    }
-
-    // Отправка графика как отдельного сообщения
-    final chartRequest = http.MultipartRequest('POST', Uri.parse(url))
-      ..fields['chat_id'] = chatId
-      ..fields['caption'] = 'Chart for $symbol'
-      ..fields['parse_mode'] = 'Markdown'
-      ..files.add(http.MultipartFile.fromBytes(
-        'photo',
-        chartImage,
-        filename: 'chart_$symbol.png',
-      ));
-
-    final chartStreamedResponse = await chartRequest.send();
-    final chartResponse = await http.Response.fromStream(chartStreamedResponse);
-
-    if (chartResponse.statusCode != 200) {
-      print(
-          "Failed to send chart image: ${chartResponse.statusCode}, ${chartResponse.body}");
-    } else {
-      print("Chart image sent successfully for token: $tokenAddress");
+          "Ошибка отправки сообщения в Telegram: ${response.statusCode}, ${response.body}");
     }
   } catch (e) {
-    print("Error sending Telegram notification: $e");
+    print("Ошибка при отправке уведомления в Telegram: $e");
   }
 }
 
@@ -192,7 +152,7 @@ Future<void> sendTelegramNotificationMemCoins(
     final int age = DateTime.now().difference(getDateTime(timestamp)).inMinutes;
 
     String socialLinksString =
-        '🔹 *BulX:* ${'https://neo.bullx.io/terminal?chainId=1399811149&address=$tokenAddress'}\n\n';
+        '🔹 *Axiom:* ${'https://axiom.trade/meme/${marketCapAndAge.biggestPoolAddress}'}\n\n';
 
     if (discordLink?.isNotEmpty ?? false) {
       socialLinksString += '🔹 *Discord:* $discordLink\n';
@@ -210,17 +170,14 @@ Future<void> sendTelegramNotificationMemCoins(
     final String caption = '''
 *Новый токен обнаружен!* 🚀
 
-🔹 *Название:* $name : $scamProbability% scam
+🔹 *Название:* $name : $scamProbability% scam ($count)
 🔹 *Символ:* $symbol
 🔹 *Маркеткап:* ${formatMarketCap(marketCapAndAge.marketCap.toString())}
 🔹 *Возраст:* ${formatAge(age)}
 🔹 *Ликвидность:* $liquidity
 🔹 *Транзакции:* $txnCount24
-🔹 *Уникальные покупки:* $uniqueBuys24
-🔹 *Уникальные продажи:* $uniqueSells24
+🔹 *Уникальные покупки:* $uniqueBuys24 продажи: $uniqueSells24
 🔹 *Холдеры:* ${token['holders'] ?? 'N/A'}
-
-$count
 
 $socialLinksString
 

@@ -58,14 +58,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _isMonitoringHuobi = false;
   bool isRefresh = true;
   bool isScreen = false;
-
   final _chartKey = GlobalKey();
-
   List<dynamic> _previousTokens = [];
   final Set<String> _sentTokens = {};
-
-  late WebSocketChannel _channel;
-  final Set<String> _notifiedPoolIds = {};
+  final Set<String> notifiedPoolIds = {};
 
   @override
   void initState() {
@@ -91,79 +87,91 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  void connectWebSocketMem() async {
-    try {
-      _channel = WebSocketChannel.connect(
-        Uri.parse('wss://trench-stream.jup.ag/ws'),
-      );
+  Future<void> connectWebSocketMem() async {
+    const String webSocketUrl = 'wss://trench-stream.jup.ag/ws';
+    const Duration reconnectDelay = Duration(seconds: 2);
+    late WebSocketChannel channel;
 
-      _channel.sink.add(jsonEncode({"type": "subscribe:recent"}));
-      _channel.sink.add(jsonEncode({"type": "subscribe:pool", "pools": []}));
-      _channel.sink.add(jsonEncode({"type": "subscribe:txns", "assets": []}));
+    void subscribeToChannels() {
+      final subscriptions = [
+        {"type": "subscribe:recent"},
+        {"type": "subscribe:pool", "pools": []},
+        {"type": "subscribe:txns", "assets": []}
+      ];
 
-      _channel.stream.listen(
-        (message) async {
-          try {
-            final data = jsonDecode(message);
-            if (data['type'] == 'updates' || data['type'] == 'new') {
-              await handlePoolUpdates(data);
-            }
-          } catch (e) {
-            print('Error processing message: $e');
+      for (var subscription in subscriptions) {
+        channel.sink.add(jsonEncode(subscription));
+      }
+    }
+
+    Future<void> processPool(Map<String, dynamic> pool,
+        {required int threshold}) async {
+      if (!passesFilters(pool) || notifiedPoolIds.contains(pool['id'])) return;
+
+      notifiedPoolIds.add(pool['id']);
+      final tokenAddress = (pool['baseAsset']?['id'] as String?) ?? 'N/A';
+
+      final marketCapAndAge = await fetchTokenInfo(tokenAddress);
+      if (marketCapAndAge == null) return;
+
+      final timestamp = marketCapAndAge.creationTimestamp != 0
+          ? marketCapAndAge.creationTimestamp
+          : marketCapAndAge.openTimestamp;
+
+      final age = DateTime.now().difference(getDateTime(timestamp)).inMinutes;
+      if (age > 40) return;
+
+      final chartData = await fetchChartDataMem(tokenAddress);
+      if (chartData == null || chartData.isEmpty) return;
+
+      final chartImage = await showChartDialog(chartData);
+      if (chartImage == null) return;
+
+      final percent = await analyzeTokenWithAIMem(pool);
+      if (percent > threshold) return;
+
+      AudioPlayer().play(AssetSource('audio/coll.mp3'), volume: 0.8);
+      sendTelegramNotificationMem(marketCapAndAge, percent, chartImage);
+    }
+
+    Future<void> handleMessage(dynamic message) async {
+      try {
+        final data = jsonDecode(message);
+        final updates = data['data'] as List?;
+        if (updates == null) return;
+
+        for (var update in updates) {
+          if (update['type'] == 'update' && update['pool'] != null) {
+            processPool(update['pool'], threshold: 60);
           }
+        }
+      } catch (e) {
+        print('Message processing error: $e');
+      }
+    }
+
+    void reconnect() {
+      Future.delayed(reconnectDelay, connectWebSocketMem);
+    }
+
+    try {
+      channel = WebSocketChannel.connect(Uri.parse(webSocketUrl));
+      subscribeToChannels();
+
+      channel.stream.listen(
+        (message) => handleMessage(message),
+        onError: (error) {
+          print('WebSocket error: $error');
+          reconnect();
         },
-        onError: (error) => print('WebSocket error: $error'),
         onDone: () {
-          print('WebSocket closed');
-          Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
+          print('WebSocket connection closed');
+          reconnect();
         },
       );
     } catch (e) {
-      print('Error connecting to WebSocket: $e');
-      Future.delayed(const Duration(seconds: 2), connectWebSocketMem);
-    }
-  }
-
-  Future<void> handlePoolUpdates(Map<String, dynamic> data) async {
-    final pools = data['data'] as List<dynamic>;
-    final type = data['type'];
-
-    for (var poolData in pools) {
-      if (poolData['type'] == type && poolData['pool'] != null) {
-        final pool = poolData['pool'];
-        if (passesFilters(pool) && !_notifiedPoolIds.contains(pool['id'])) {
-          _notifiedPoolIds.add(pool['id']);
-
-          final baseAsset = pool['baseAsset'] ?? {};
-          final String tokenAddress = baseAsset['id'] ?? 'N/A';
-          final marketCapAndAge = await fetchTokenInfo(tokenAddress);
-
-          if (marketCapAndAge == null) {
-            final int timestamp = marketCapAndAge!.creationTimestamp != 0
-                ? marketCapAndAge.creationTimestamp
-                : marketCapAndAge.openTimestamp;
-
-            final int age =
-                DateTime.now().difference(getDateTime(timestamp)).inMinutes;
-
-            if (age <= 40) {
-              final chartData = await fetchChartDataMem(tokenAddress);
-              if (chartData != null && chartData.isNotEmpty) {
-                final chartImage = await showChartDialog(chartData);
-                if (chartImage != null) {
-                  final percent = await analyzeTokenWithAIMem(pool);
-                  if (percent <= 60) {
-                    AudioPlayer()
-                        .play(AssetSource('audio/coll.mp3'), volume: 0.8);
-
-                    sendTelegramNotificationMem(pool, chartImage, percent);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+      print('WebSocket connection error: $e');
+      reconnect();
     }
   }
 
@@ -189,11 +197,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         });
 
         return Dialog(
-          insetPadding: EdgeInsets.only(
+          insetPadding: const EdgeInsets.only(
             left: 0,
             right: 0,
-            bottom: height * 0.15,
-            top: height * 0.15,
+            bottom: 0,
+            top: 0,
           ),
           child: Scaffold(
             backgroundColor: Colors.transparent,
@@ -298,25 +306,25 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       if (age >= 60) return false;
     }
 
-    final bool hasEnoughMarketCap = marketCap >= 4000 && marketCap <= 150000;
+    final bool hasEnoughMarketCap = marketCap >= 5000 && marketCap <= 150000;
     final bool hasEnoughLiquidity = liquidity >= 4000;
     final bool hasEnoughVolume24h = volume24h >= 3000;
-    final bool hasEnoughHolders = holders >= 50;
-    final bool isNotTooOld = age <= 60;
+    final bool hasEnoughHolders = holders >= 35;
+    final bool isNotTooOld = age <= 30;
 
     final bool hasHighVolume24h =
-        buyVolume24h >= 3000 || sellVolume24h >= 3000; // Высокий объем торгов
+        buyVolume24h >= 3500 || sellVolume24h >= 3500; // Высокий объем торгов
     final bool hasEnoughTraders24h =
-        numTraders24h >= 20; // Достаточно трейдеров за 24 часа
+        numTraders24h >= 25; // Достаточно трейдеров за 24 часа
     final bool hasMoreBuysThanSells24h =
         numBuys24h > numSells24h; // Покупок больше, чем продаж
     final bool hasLowTopHoldersPercentage =
-        topHoldersPercentage <= 25; // Низкая концентрация у крупных держателей
+        topHoldersPercentage <= 30; // Низкая концентрация у крупных держателей
 
     final bool hasGoodOrganicScore =
-        organicScore >= 25; // Хороший органический рост
+        organicScore >= 30; // Хороший органический рост
     final bool hasEnoughOrganicBuyers =
-        organicBuyers24h >= 25; // Достаточно органических покупателей
+        organicBuyers24h >= 30; // Достаточно органических покупателей
 
     return hasEnoughMarketCap &&
         hasEnoughLiquidity &&
@@ -338,7 +346,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _startTimer() async {
-    Timer.periodic(Duration(seconds: 3), (_) {
+    Timer.periodic(Duration(seconds: 2), (_) {
       _fetchAndUpdateTokens();
     });
   }
@@ -368,17 +376,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
         final hasEnoughVolume = volume24 > 9000;
         final hasEnoughUniqueParticipants =
-            uniqueBuys24 > 290 && uniqueSells24 > 190;
-        final hasEnoughTransactions = txnCount24 > 250;
-        final hasEnoughLiquidity = liquidity > 7000;
-        final hasEnoughHolders = holders >= 500;
+            uniqueBuys24 > 320 && uniqueSells24 > 220;
+        final hasEnoughTransactions = txnCount24 > 280;
+        final hasEnoughLiquidity = liquidity > 9000;
+        final hasEnoughHolders = holders >= 550;
 
-        final hasEnoughMarketCap =
-            marketCap >= 10000 && marketCap <= 1_000_000 ||
-                marketCap >= 100000 && marketCap < 3_000_000 ||
-                marketCap >= 3000000 && marketCap < 5_000_000 ||
-                marketCap >= 5000000 && marketCap < 20_000_000 ||
-                marketCap >= 10000000 && marketCap < 50_000_000;
+        final hasEnoughMarketCap = marketCap >= 10000 && marketCap <= 1000000 ||
+            marketCap >= 100000 && marketCap < 3000000 ||
+            marketCap >= 3000000 && marketCap < 5000000 ||
+            marketCap >= 5000000 && marketCap < 20000000 ||
+            marketCap >= 10000000 && marketCap < 50000000;
 
         return hasEnoughMarketCap &&
             isOldEnough &&
@@ -948,11 +955,11 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 });
 
                 return Dialog(
-                  insetPadding: EdgeInsets.only(
+                  insetPadding: const EdgeInsets.only(
                     left: 0,
                     right: 0,
-                    bottom: height * 0.15,
-                    top: height * 0.15,
+                    bottom: 0,
+                    top: 0,
                   ),
                   child: Scaffold(
                     backgroundColor: Colors.transparent,
@@ -1151,15 +1158,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         'https://www.binance.com/en/trade/${symbol.replaceAll("USDT", "_USDT")}';
 
     final String caption = '''
-$direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
+$direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $time $direction
 
-🔹 *Symbol:* [$symbol]($symbol)
-🔹 *Timeframe:* $time
-🔹 *Last Candle * ${lastCandleAvgPriceChangePercent?.toStringAsFixed(2) ?? 'N/A'}%
-🔹 *Platform:* $isPlatform  $exchange 
+🔹 *Last Candle * ${lastCandleAvgPriceChangePercent?.toStringAsFixed(2) ?? 'N/A'}% $isPlatform
 🔹 *Binance Link:* [$symbol]($binanceUrl)
-
-💵 *Current Price:* ${currentPrice.toStringAsFixed(2)} USD
   '''
         .trim();
 
@@ -1274,7 +1276,7 @@ $direction *$symbol ${changePercent.abs().toStringAsFixed(1)}%* $direction
                       setState(() => isScreen = value);
                       _storageService.saveSelectedScreen(value);
                     },
-                    activeTrackColor: Colors.deepPurpleAccent,
+                    // activeTrackColor: Colors.deepPurpleAccent,
                   ),
                 ],
               ),
