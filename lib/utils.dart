@@ -2,22 +2,107 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:intl/intl.dart';
 
+import 'model/chart.dart';
+
+import 'package:syncfusion_flutter_charts/charts.dart';
+
+Future<Uint8List?> showChartDialog(
+    List<ChartModelMem> chartData, BuildContext context) async {
+  final chartKey = GlobalKey();
+  Uint8List? chartImage;
+
+  while (Navigator.of(context).canPop()) {
+    await SchedulerBinding.instance.endOfFrame;
+    await Future.delayed(Duration(milliseconds: 20));
+  }
+
+  await showDialog(
+    context: context,
+    barrierColor: Colors.transparent,
+    builder: (context) {
+      final height = MediaQuery.of(context).size.height;
+
+      Future.delayed(Duration(milliseconds: 150), () async {
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+      });
+
+      return Dialog(
+        insetPadding: const EdgeInsets.only(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          top: 0,
+        ),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SizedBox(
+            width: MediaQuery.of(context).size.width,
+            height: MediaQuery.of(context).size.height,
+            child: RepaintBoundary(
+              key: chartKey,
+              child: SfCartesianChart(
+                backgroundColor: Colors.black,
+                trackballBehavior: TrackballBehavior(
+                  enable: true,
+                  activationMode: ActivationMode.singleTap,
+                  tooltipAlignment: ChartAlignment.near,
+                ),
+                primaryXAxis: NumericAxis(isVisible: false),
+                zoomPanBehavior: ZoomPanBehavior(
+                  enablePinching: true,
+                  zoomMode: ZoomMode.xy,
+                  selectionRectBorderWidth: 10,
+                  enablePanning: true,
+                  enableDoubleTapZooming: true,
+                  enableMouseWheelZooming: true,
+                  enableSelectionZooming: true,
+                ),
+                series: <CandleSeries>[
+                  CandleSeries<ChartModelMem, int>(
+                    enableSolidCandles: true,
+                    enableTooltip: true,
+                    dataSource: chartData,
+                    xValueMapper: (ChartModelMem sales, _) => sales.time,
+                    lowValueMapper: (ChartModelMem sales, _) => sales.low,
+                    highValueMapper: (ChartModelMem sales, _) => sales.high,
+                    openValueMapper: (ChartModelMem sales, _) => sales.open,
+                    closeValueMapper: (ChartModelMem sales, _) => sales.close,
+                    animationDuration: 0,
+                  )
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  chartImage = await captureChart(chartKey);
+  return chartImage;
+}
 
 DateTime getDateTime(int timestamp) {
   return DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
 }
 
-Future<Uint8List?> captureChart(GlobalKey chartKey, {int maxAttempts = 5}) async {
+Future<Uint8List?> captureChart(GlobalKey chartKey,
+    {int maxAttempts = 5}) async {
   int attempts = 0;
   while (attempts < maxAttempts) {
     try {
       RenderRepaintBoundary boundary =
-      chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          chartKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
       ui.Image image = await boundary.toImage(pixelRatio: 3);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } catch (e) {
       attempts++;
@@ -75,7 +160,6 @@ String formatAgeSeconds(int seconds) {
     }
   }
 }
-
 
 String formatMarketCapString(String value) {
   final double? num = double.tryParse(value);
@@ -170,7 +254,6 @@ String formatMarketCap(dynamic marketCap) {
     return "\$${formatter.format(value)}";
   }
 }
-
 
 // Вспомогательная функция для парсинга double
 double parseDouble(dynamic value) {
