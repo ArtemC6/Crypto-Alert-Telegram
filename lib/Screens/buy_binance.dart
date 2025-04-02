@@ -4,26 +4,21 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 class BinanceFuturesClient {
-  static const String apiKey =
-      'AazqfPsSB6hEPfdBsr67RRZCYWkQjxLOwapQG56oQZNyyu4RSb6qQxE70zV8MDKV';
-  static const String secretKey =
-      '7pBSo1KnhC9hz3GzpQBDnbeTab0U4eI0cu2H8MKjPZh0gx2x8drsNeA69o8eUFRk';
+  static const String apiKey = 'AazqfPsSB6hEPfdBsr67RRZCYWkQjxLOwapQG56oQZNyyu4RSb6qQxE70zV8MDKV';
+  static const String secretKey = '7pBSo1KnhC9hz3GzpQBDnbeTab0U4eI0cu2H8MKjPZh0gx2x8drsNeA69o8eUFRk';
   static const String baseUrl = 'https://fapi.binance.com';
 
   /// Генерация подписи
   static String _generateSignature(Map<String, dynamic> params) {
-    final queryString =
-    params.entries.map((e) => '${e.key}=${e.value}').join('&');
-    return Hmac(sha256, utf8.encode(secretKey))
-        .convert(utf8.encode(queryString))
-        .toString();
+    final queryString = params.entries.map((e) => '${e.key}=${e.value}').join('&');
+    return Hmac(sha256, utf8.encode(secretKey)).convert(utf8.encode(queryString)).toString();
   }
 
   /// Отправка авторизованного POST-запроса
   static Future<dynamic> _sendAuthorizedPostRequest(
-      String endpoint,
-      Map<String, dynamic> params,
-      ) async {
+    String endpoint,
+    Map<String, dynamic> params,
+  ) async {
     try {
       final requestParams = {
         ...params,
@@ -35,9 +30,7 @@ class BinanceFuturesClient {
       final signedParams = {...requestParams, 'signature': signature};
 
       final uri = Uri.parse('$baseUrl$endpoint');
-      final body = signedParams.entries
-          .map((e) => '${e.key}=${Uri.encodeComponent(e.value.toString())}')
-          .join('&');
+      final body = signedParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value.toString())}').join('&');
 
       final response = await http.post(
         uri,
@@ -88,7 +81,7 @@ class BinanceFuturesClient {
     final exchangeInfo = await getExchangeInfo();
     final symbols = exchangeInfo['symbols'] as List<dynamic>;
     final symbolInfo = symbols.firstWhere(
-          (s) => s['symbol'] == symbol,
+      (s) => s['symbol'] == symbol,
       orElse: () => throw Exception('Symbol $symbol not found'),
     );
 
@@ -102,7 +95,7 @@ class BinanceFuturesClient {
   static Future<Map<String, dynamic>> openMarketOrder({
     required String symbol,
     required String side, // 'BUY' или 'SELL'
-    required double quantity,
+    required double usdtAmount, // Сумма в USDT
     String? newClientOrderId,
   }) async {
     // Получаем precision и текущую цену
@@ -110,11 +103,12 @@ class BinanceFuturesClient {
     final quantityPrecision = precision['quantityPrecision']!;
     final currentPrice = await getCurrentPrice(symbol);
 
+    // Рассчитываем количество
+    double quantity = usdtAmount / currentPrice;
+
     // Проверяем минимальный notional (quantity * price >= 5 USDT)
-    final notional = quantity * currentPrice;
-    if (notional < 5.0) {
-      throw Exception(
-          'Notional value ($notional USDT) is below minimum 5 USDT. Increase quantity.');
+    if (usdtAmount < 5.0) {
+      throw Exception('Notional value ($usdtAmount USDT) is below minimum 5 USDT. Increase amount.');
     }
 
     final params = {
@@ -133,14 +127,12 @@ class BinanceFuturesClient {
   /// Установка Take Profit и Stop Loss
   static Future<void> setAutoTakeProfitAndStopLoss({
     required String symbol,
-    required double quantity,
     required String positionSide, // 'LONG' или 'SHORT'
     double takeProfitPercent = 3.0, // 3% тейк-профит
-    double stopLossPercent = 1.0,   // 1% стоп-лосс
+    double stopLossPercent = 1.0, // 1% стоп-лосс
     String? newClientOrderId,
   }) async {
     final precision = await getSymbolPrecision(symbol);
-    final quantityPrecision = precision['quantityPrecision']!;
     final pricePrecision = precision['pricePrecision']!;
     final currentPrice = await getCurrentPrice(symbol);
 
@@ -149,7 +141,8 @@ class BinanceFuturesClient {
     if (positionSide == 'LONG') {
       takeProfitPrice = currentPrice * (1 + takeProfitPercent / 100);
       stopLossPrice = currentPrice * (1 - stopLossPercent / 100);
-    } else { // SHORT
+    } else {
+      // SHORT
       takeProfitPrice = currentPrice * (1 - takeProfitPercent / 100);
       stopLossPrice = currentPrice * (1 + stopLossPercent / 100);
     }
@@ -167,10 +160,9 @@ class BinanceFuturesClient {
     final slParams = {
       'symbol': symbol,
       'side': orderSide,
-      'quantity': quantity.toStringAsFixed(quantityPrecision),
       'type': 'STOP_MARKET',
       'stopPrice': stopLossPrice.toStringAsFixed(pricePrecision),
-      'reduceOnly': 'true',
+      'closePosition': 'true', // Закрываем всю позицию
       'workingType': 'MARK_PRICE',
       if (newClientOrderId != null) 'newClientOrderId': '${newClientOrderId}_SL',
     };
@@ -182,10 +174,9 @@ class BinanceFuturesClient {
     final tpParams = {
       'symbol': symbol,
       'side': orderSide,
-      'quantity': quantity.toStringAsFixed(quantityPrecision),
       'type': 'TAKE_PROFIT_MARKET',
       'stopPrice': takeProfitPrice.toStringAsFixed(pricePrecision),
-      'reduceOnly': 'true',
+      'closePosition': 'true', // Закрываем всю позицию
       'workingType': 'MARK_PRICE',
       if (newClientOrderId != null) 'newClientOrderId': '${newClientOrderId}_TP',
     };
@@ -194,4 +185,3 @@ class BinanceFuturesClient {
     print('✅ Take Profit установлен на $takeProfitPrice');
   }
 }
-
